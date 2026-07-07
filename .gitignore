@@ -1,0 +1,77 @@
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Runtime files
+uploads/
+backend/uploads/
+logs/
+backend/logs/
+deploy/caddy/logs/
+*.log
+*.pid
+
+# Local databases / generated data
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.trn
+*.ldf
+*.mdf
+
+# Build/package outputs
+build/
+dist/
+*.egg-info/
+wheelhouse/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+~$*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tooling caches
+.cache/
+.tox/
+.nox/
+
+# Large uploaded 3D/model/slice artifacts should not be committed
+*.gcode
+*.bgcode
+*.3mf
+*.stl
+*.obj
+*.step
+*.stp
+*.fbx
+
+# Keep source design docs and SQL scripts tracked.

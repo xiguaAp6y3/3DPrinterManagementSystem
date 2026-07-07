@@ -1,0 +1,12 @@
+[project]
+name = "agentorder"
+version = "0.1.0"
+requires-python = ">=3.13"
+description = "3D print farm backend API"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.pyright]
+pythonVersion = "3.13"
