@@ -1,6 +1,6 @@
 IF DB_ID(N'AgentOrder') IS NULL
 BEGIN
-    CREATE DATABASE AgentOrder COLLATE Chinese_PRC_100_CI_AS_SC_UTF8;
+    CREATE DATABASE AgentOrder;
 END;
 GO
 
@@ -8,9 +8,9 @@ USE AgentOrder;
 GO
 
 -- Encoding policy:
--- 1. Database default collation uses SQL Server UTF-8 collation for VARCHAR compatibility.
--- 2. Business text columns still use NVARCHAR/NCHAR to store Chinese safely as Unicode.
--- 3. String literals containing Chinese must use N'' prefix, for example N'默认分类'.
+-- 1. Business text columns use NVARCHAR/NCHAR to store Chinese safely as Unicode.
+-- 2. String literals containing Chinese must use N'' prefix, for example N'默认分类'.
+-- 3. Do not require SQL Server UTF-8 collation; older SQL Server versions may not support *_UTF8 collations.
 
 CREATE SEQUENCE dbo.seq_order_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_custom_request_no AS BIGINT START WITH 1 INCREMENT BY 1;

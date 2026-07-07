@@ -27,10 +27,10 @@ Copy-Item .env.example .env
 
 - 项目源码统一使用 UTF-8，见根目录 `.editorconfig`。
 - Python 运行建议启用 `PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8`。
-- SQL Server 数据库默认使用 `Chinese_PRC_100_CI_AS_SC_UTF8` collation。
-- 业务文本字段使用 `NVARCHAR`，这是 SQL Server 中存储中文最稳妥的方式。
+- SQL Server 中文存储不强制依赖 UTF-8 collation。
+- 业务文本字段使用 `NVARCHAR`，这是 SQL Server 中存储中文最稳妥、兼容性最高的方式。
 - SQL 脚本中的中文字符串必须使用 `N'中文'` 写法，避免被当作非 Unicode 字符串处理。
-- 如果本机 SQL Server 版本低于 2019，不支持 `_UTF8` collation，需要把建库语句中的 `COLLATE Chinese_PRC_100_CI_AS_SC_UTF8` 去掉，但仍保留所有业务字段为 `NVARCHAR`。
+- 如果你确认 SQL Server 版本支持 `_UTF8` collation，也可以自行给数据库指定 UTF-8 collation；但本项目默认不强制指定，避免旧版本 SQL Server 报 `Invalid collation`。
 
 ## 2. 初始化数据库
 
