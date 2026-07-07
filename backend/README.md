@@ -1,18 +1,36 @@
 # 3DPMS Backend
 
-阶段1后端基线：
+3DPMS Backend 是 3D 打印农场管理系统的 FastAPI 后端。
 
-- FastAPI 本地服务。
-- Python 3.13。
-- SQL Server 数据库。
-- Caddy 反向代理暴露 API。
-- API 前缀：`/api/v1`。
-- 阶段1不接在线支付、不接物流、不接打印机自动控制。
+当前阶段目标是先稳定数据库结构和 API 契约，支持 Flutter 客户端和电脑端管理后台后续联调。多数接口目前仍是骨架返回，下一步需要接入 SQLAlchemy service、SQL Server 事务和真实鉴权。
 
-## 1. 初始化环境
+## 1. 技术栈
+
+- Python 3.13
+- FastAPI
+- SQLAlchemy 2.x
+- SQL Server
+- pyodbc
+- Pydantic Settings
+- JWT
+- pwdlib[argon2]
+- Caddy 反向代理
+
+## 2. 运行约定
+
+- 后端本地监听：`127.0.0.1:5000`
+- API 前缀：`/api/v1`
+- 数据库名：`3DPMS`
+- 阶段 1 不接在线支付、不接物流、不接打印机自动控制。
+- 打印机状态暂时由管理端人工维护。
+- 上架商品为下单后生产，不维护现货售卖库存。
+
+## 3. 初始化环境
+
+在项目根目录执行：
 
 ```powershell
-cd backend
+cd C:\Users\Gua3\Desktop\3DPrinterManagementSystem\backend
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONUTF8="1"
@@ -21,28 +39,43 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-编辑 `.env` 中的 SQL Server 连接信息。
+编辑 `.env` 中的 SQL Server 连接信息：
 
-## 编码约定
+```env
+SQLSERVER_HOST=127.0.0.1
+SQLSERVER_PORT=1433
+SQLSERVER_DATABASE=3DPMS
+SQLSERVER_USER=sa
+SQLSERVER_PASSWORD=YourStrongPassword
+SQLSERVER_DRIVER=ODBC Driver 18 for SQL Server
+SQLSERVER_TRUST_CERTIFICATE=true
+```
 
-- 项目源码统一使用 UTF-8，见根目录 `.editorconfig`。
+如果 PowerShell 禁止激活虚拟环境，可以临时允许当前进程执行脚本：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+## 4. 编码和中文存储
+
+- 源码统一使用 UTF-8。
 - Python 运行建议启用 `PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8`。
-- SQL Server 中文存储不强制依赖 UTF-8 collation。
-- 业务文本字段使用 `NVARCHAR`，这是 SQL Server 中存储中文最稳妥、兼容性最高的方式。
-- SQL 脚本中的中文字符串必须使用 `N'中文'` 写法，避免被当作非 Unicode 字符串处理。
-- 如果你确认 SQL Server 版本支持 `_UTF8` collation，也可以自行给数据库指定 UTF-8 collation；但本项目默认不强制指定，避免旧版本 SQL Server 报 `Invalid collation`。
+- SQL Server 中文文本字段使用 `NVARCHAR`。
+- SQL 脚本中的中文字符串使用 `N'中文'`。
+- 默认不强制 `_UTF8` collation，避免部分 SQL Server 环境报 `Invalid collation`。
+- 不要把业务中文文本存进 `VARCHAR` 字段。
 
-## 2. 初始化数据库
+## 5. 初始化数据库
 
-按顺序在 SQL Server 中执行。
-
-第一步，连接到 `master` 或默认数据库，执行：
+第一步：连接到 `master` 或默认数据库，执行建库脚本：
 
 ```text
 deploy/sql/000_create_database.sql
 ```
 
-第二步，重新建立连接，并将连接数据库指定为 `3DPMS`，再执行：
+第二步：新建连接，并将连接数据库直接指定为 `3DPMS`，再依次执行：
 
 ```text
 deploy/sql/001_create_tables.sql
@@ -50,25 +83,30 @@ deploy/sql/002_create_triggers.sql
 deploy/sql/003_seed_dev.sql
 ```
 
-注意：部分 SQL Server 环境不支持在脚本中使用 `USE` 切换数据库，所以脚本已拆分为“建库脚本”和“库内对象脚本”。
-库内对象脚本不包含 `USE` 语句，必须在当前连接已经选中 `3DPMS` 数据库的情况下执行。
+注意：
 
-## 3. 启动后端
+- 库内对象脚本不包含 `USE 3DPMS`。
+- 如果 SQL 客户端不支持 `USE` 切库，必须用新连接直接连接到 `3DPMS`。
+- 不要把脚本改回 `USE AgentOrder` 或其他旧库名。
 
-如果当前已经在 `backend` 目录下，不要再次执行 `cd backend`。
+## 6. 启动后端
+
+如果当前不在 `backend` 目录：
 
 ```powershell
-cd backend
+cd C:\Users\Gua3\Desktop\3DPrinterManagementSystem\backend
 .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --host 127.0.0.1 --port 5000 --reload
 ```
 
-如果你已经位于 `...\3DPrinterManagementSystem\backend`，直接执行：
+如果当前已经在 `backend` 目录，直接执行：
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --host 127.0.0.1 --port 5000 --reload
 ```
+
+不要在 `backend` 目录里再次执行 `cd backend`，否则会进入不存在的 `backend\backend`。
 
 健康检查：
 
@@ -76,13 +114,41 @@ uvicorn app.main:app --host 127.0.0.1 --port 5000 --reload
 http://127.0.0.1:5000/health
 ```
 
-OpenAPI 文档：
+Swagger UI：
 
 ```text
 http://127.0.0.1:5000/docs
 ```
 
-## 4. Caddy 暴露 API
+ReDoc：
+
+```text
+http://127.0.0.1:5000/redoc
+```
+
+OpenAPI JSON：
+
+```text
+http://127.0.0.1:5000/openapi.json
+```
+
+## 7. 导出 API 文档
+
+启动后端后，可以下载 OpenAPI 文件：
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:5000/openapi.json -OutFile D:\openapi.json
+```
+
+也可以在浏览器打开：
+
+```text
+http://127.0.0.1:5000/openapi.json
+```
+
+然后保存为 `openapi.json`，导入 Apifox、Postman 或前端 SDK 生成工具。
+
+## 8. Caddy 暴露 API
 
 配置文件：
 
@@ -90,39 +156,101 @@ http://127.0.0.1:5000/docs
 deploy/caddy/Caddyfile
 ```
 
-将 `api.example.com` 替换为你的域名，然后启动 Caddy。
+默认反向代理目标：
 
-暴露后的检查：
+```text
+127.0.0.1:5000
+```
+
+启动示例：
+
+```powershell
+cd C:\Users\Gua3\Desktop\3DPrinterManagementSystem\deploy\caddy
+.\caddy run --config Caddyfile
+```
+
+将 `api.example.com` 替换为你的真实域名。暴露后检查：
 
 ```text
 https://你的域名/health
 https://你的域名/api/v1/app/products
 ```
 
-## 5. 当前已实现的接口骨架
+## 9. 认证说明
 
-客户侧：
+当前登录接口仍是开发骨架：
+
+- 客户登录：未接真实验证码。
+- 管理员登录：未接真实密码校验。
+- JWT 已生成，但用户身份仍需后续接数据库。
+
+后续进入联调前，至少需要完成：
+
+- 用户表查询。
+- 管理员密码哈希校验。
+- 用户状态校验。
+- 角色权限校验。
+
+## 10. 幂等要求
+
+关键写接口必须传 `Idempotency-Key` Header：
+
+```http
+Idempotency-Key: 任意唯一字符串
+```
+
+当前已在 OpenAPI 中标记为必填的接口：
+
+- `POST /api/v1/app/orders/listed-product`
+- `POST /api/v1/app/custom-requests`
+- `POST /api/v1/app/quotes/{quote_id}/confirm`
+- `POST /api/v1/admin/orders/{order_id}/payment-confirm`
+- `POST /api/v1/admin/production-schedule-orders`
+- `POST /api/v1/admin/inventory/materials/{material_id}/stock-logs`
+
+下一步需要将这些接口接入 `idempotency_keys` 表，做到重复请求返回同一业务结果。
+
+## 11. 当前 API 清单
+
+### 系统接口
+
+- `GET /health`
+
+### 客户 APP 端
 
 - `POST /api/v1/app/auth/login`
+- `GET /api/v1/app/product-categories`
 - `GET /api/v1/app/products`
 - `GET /api/v1/app/products/{product_id}`
 - `GET /api/v1/app/products/{product_id}/images`
+- `GET /api/v1/app/orders`
+- `GET /api/v1/app/orders/{order_no}`
 - `POST /api/v1/app/orders/listed-product`
 - `POST /api/v1/app/files/upload`
+- `GET /api/v1/app/files/{file_id}`
+- `GET /api/v1/app/files/{file_id}/download-url`
+- `DELETE /api/v1/app/files/{file_id}`
+- `GET /api/v1/app/custom-requests`
 - `POST /api/v1/app/custom-requests`
 - `GET /api/v1/app/custom-requests/{request_id}`
 - `PATCH /api/v1/app/custom-requests/{request_id}`
 - `GET /api/v1/app/quotes/{quote_id}`
 - `POST /api/v1/app/quotes/{quote_id}/confirm`
 
-管理侧：
+### 管理端
 
 - `POST /api/v1/admin/auth/login`
 - `GET /api/v1/admin/dashboard`
+- `GET /api/v1/admin/product-categories`
+- `POST /api/v1/admin/product-categories`
+- `PATCH /api/v1/admin/product-categories/{category_id}`
 - `GET /api/v1/admin/products`
 - `POST /api/v1/admin/products`
 - `PATCH /api/v1/admin/products/{product_id}`
 - `POST /api/v1/admin/products/{product_id}/images`
+- `GET /api/v1/admin/products/{product_id}/images`
+- `PATCH /api/v1/admin/products/product-images/{image_id}`
+- `DELETE /api/v1/admin/products/product-images/{image_id}`
 - `PATCH /api/v1/admin/products/{product_id}/sales-status`
 - `GET /api/v1/admin/products/{product_id}/skus`
 - `POST /api/v1/admin/products/{product_id}/skus`
@@ -131,21 +259,84 @@ https://你的域名/api/v1/app/products
 - `GET /api/v1/admin/orders/{order_id}`
 - `PATCH /api/v1/admin/orders/{order_id}/status`
 - `POST /api/v1/admin/orders/{order_id}/payment-confirm`
+- `GET /api/v1/admin/custom-requests`
+- `GET /api/v1/admin/custom-requests/{request_id}`
+- `PATCH /api/v1/admin/custom-requests/{request_id}/review`
+- `POST /api/v1/admin/custom-requests/{request_id}/quote`
+- `GET /api/v1/admin/quotes`
+- `GET /api/v1/admin/quotes/{quote_id}`
+- `GET /api/v1/admin/print-tasks`
+- `POST /api/v1/admin/print-tasks`
+- `GET /api/v1/admin/print-tasks/{task_id}`
+- `PATCH /api/v1/admin/print-tasks/{task_id}/status`
 - `GET /api/v1/admin/printers`
 - `POST /api/v1/admin/printers`
+- `GET /api/v1/admin/printers/{printer_id}`
+- `PATCH /api/v1/admin/printers/{printer_id}`
 - `PATCH /api/v1/admin/printers/{printer_id}/status`
 - `GET /api/v1/admin/production-schedule-orders`
 - `POST /api/v1/admin/production-schedule-orders`
+- `GET /api/v1/admin/production-schedule-orders/{schedule_order_id}`
+- `PATCH /api/v1/admin/production-schedule-orders/{schedule_order_id}`
+- `DELETE /api/v1/admin/production-schedule-orders/{schedule_order_id}`
+- `PATCH /api/v1/admin/production-schedule-orders/items/{schedule_item_id}`
 - `GET /api/v1/admin/inventory/overview`
 - `GET /api/v1/admin/inventory/materials`
 - `POST /api/v1/admin/inventory/materials`
+- `POST /api/v1/admin/inventory/materials/{material_id}/stock-logs`
+- `POST /api/v1/admin/inventory/materials/{material_id}/loss`
+- `GET /api/v1/admin/inventory/locks`
+- `POST /api/v1/admin/inventory/locks/{lock_id}/release`
+- `POST /api/v1/admin/inventory/locks/{lock_id}/consume`
+- `GET /api/v1/admin/inventory/finished-goods`
 
-## 6. 下一步开发重点
+## 12. 业务流程
 
-1. 将接口骨架接入 SQLAlchemy service。
-2. 实现 `idempotency_keys` 幂等中间层。
-3. 实现上架商品下单事务。
-4. 实现切片文件落盘与 `model_files` 记录。
-5. 实现定制审核、报价、报价确认。
-6. 实现人工收款确认。
-7. 实现排期主表/明细表和材料库存锁定事务。
+### 上架商品下单
+
+1. 管理员维护商品、图片和 SKU。
+2. 客户 APP 浏览上架商品。
+3. 客户选择材料、颜色、尺寸、精度、数量后下单。
+4. 系统生成订单，等待人工收款确认。
+5. 管理员确认收款。
+6. 管理员创建排期和打印任务。
+7. 打印任务推进到完成。
+
+### 个性化定制
+
+1. 客户上传切片文件。
+2. 客户提交定制表单。
+3. 管理员审核。
+4. 信息不足则退回补充，无法生产则驳回。
+5. 审核通过后管理员报价。
+6. 客户确认报价。
+7. 必须收款确认后才能排期。
+8. 订单可拆分多个打印任务。
+
+### 库存和打印机
+
+1. 材料库存支持入库、调整、损耗。
+2. 排期时锁定材料。
+3. 取消或变更时释放锁定。
+4. 打印完成或确认消耗时扣减材料。
+5. 打印机状态第一阶段由管理员人工维护。
+
+## 13. 当前限制
+
+- 接口多数仍未接数据库真实读写。
+- 文件上传暂未完成真实落盘记录和鉴权下载。
+- 支付状态为人工确认，不接第三方支付。
+- 物流不在阶段 1 范围。
+- 打印机状态未接 OctoPrint / Klipper。
+- OpenAPI 已有响应模型，但返回示例和错误响应模型仍需补充。
+
+## 14. 下一步开发重点
+
+1. 实现真实登录和权限校验。
+2. 将订单、定制、报价、排期、库存接口接入 SQLAlchemy。
+3. 给关键写接口实现幂等键事务。
+4. 实现上架商品下单事务。
+5. 实现定制审核、人工报价、报价确认、人工收款确认。
+6. 实现排期主表/明细表、打印任务拆分和材料库存锁定。
+7. 补充 pytest 接口测试。
+8. 重新导出 `openapi.json` 并交给前端联调。
