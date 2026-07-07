@@ -1,6 +1,3 @@
-USE AgentOrder;
-GO
-
 CREATE OR ALTER TRIGGER dbo.trg_materials_no_negative_stock
 ON dbo.materials
 AFTER UPDATE

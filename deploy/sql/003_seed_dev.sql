@@ -1,6 +1,3 @@
-USE AgentOrder;
-GO
-
 IF NOT EXISTS (SELECT 1 FROM dbo.staff_users WHERE username = N'admin')
 BEGIN
     INSERT INTO dbo.staff_users (username, password_hash, display_name, role)

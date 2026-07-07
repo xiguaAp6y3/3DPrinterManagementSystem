@@ -1,4 +1,4 @@
-# AgentOrder 3D Print Farm Backend
+# 3DPMS Backend
 
 阶段1后端基线：
 
@@ -34,7 +34,15 @@ Copy-Item .env.example .env
 
 ## 2. 初始化数据库
 
-按顺序在 SQL Server 中执行：
+按顺序在 SQL Server 中执行。
+
+第一步，连接到 `master` 或默认数据库，执行：
+
+```text
+deploy/sql/000_create_database.sql
+```
+
+第二步，重新建立连接，并将连接数据库指定为 `3DPMS`，再执行：
 
 ```text
 deploy/sql/001_create_tables.sql
@@ -42,24 +50,36 @@ deploy/sql/002_create_triggers.sql
 deploy/sql/003_seed_dev.sql
 ```
 
+注意：部分 SQL Server 环境不支持在脚本中使用 `USE` 切换数据库，所以脚本已拆分为“建库脚本”和“库内对象脚本”。
+库内对象脚本不包含 `USE` 语句，必须在当前连接已经选中 `3DPMS` 数据库的情况下执行。
+
 ## 3. 启动后端
+
+如果当前已经在 `backend` 目录下，不要再次执行 `cd backend`。
 
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 5000 --reload
+```
+
+如果你已经位于 `...\3DPrinterManagementSystem\backend`，直接执行：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --host 127.0.0.1 --port 5000 --reload
 ```
 
 健康检查：
 
 ```text
-http://127.0.0.1:8000/health
+http://127.0.0.1:5000/health
 ```
 
 OpenAPI 文档：
 
 ```text
-http://127.0.0.1:8000/docs
+http://127.0.0.1:5000/docs
 ```
 
 ## 4. Caddy 暴露 API

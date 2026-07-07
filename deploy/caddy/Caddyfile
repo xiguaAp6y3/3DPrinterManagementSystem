@@ -18,7 +18,7 @@ api.example.com {
     }
 
     @api path /api/*
-    reverse_proxy @api 127.0.0.1:8000 {
+    reverse_proxy @api 127.0.0.1:5000 {
         header_up X-Forwarded-Proto {scheme}
         header_up X-Forwarded-Host {host}
         transport http {
@@ -28,5 +28,5 @@ api.example.com {
     }
 
     @health path /health
-    reverse_proxy @health 127.0.0.1:8000
+    reverse_proxy @health 127.0.0.1:5000
 }
