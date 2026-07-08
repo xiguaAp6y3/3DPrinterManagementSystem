@@ -1,7 +1,14 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette import status
+
+
+class ErrorResponse(BaseModel):
+    code: str
+    message: str
+    details: dict | list | None = Field(default_factory=dict)
 
 
 class AppError(Exception):
@@ -14,6 +21,18 @@ class AppError(Exception):
 
 def error_response(code: str, message: str, details=None):
     return {"code": code, "message": message, "details": details or {}}
+
+
+COMMON_ERROR_RESPONSES = {
+    400: {"model": ErrorResponse, "description": "Bad Request"},
+    401: {"model": ErrorResponse, "description": "Unauthorized"},
+    403: {"model": ErrorResponse, "description": "Forbidden"},
+    404: {"model": ErrorResponse, "description": "Not Found"},
+    409: {"model": ErrorResponse, "description": "Conflict"},
+    413: {"model": ErrorResponse, "description": "Payload Too Large"},
+    422: {"model": ErrorResponse, "description": "Validation Error"},
+    500: {"model": ErrorResponse, "description": "Internal Server Error"},
+}
 
 
 def register_exception_handlers(app: FastAPI) -> None:

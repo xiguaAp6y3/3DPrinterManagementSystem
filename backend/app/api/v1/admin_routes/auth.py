@@ -1,5 +1,3 @@
-from typing import Any
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -14,7 +12,20 @@ class AdminLoginRequest(BaseModel):
     password: str
 
 
-@router.post("/login", response_model=ApiResponse[dict[str, Any]])
+class StaffUserInfo(BaseModel):
+    id: int | None = None
+    username: str
+    role: str = "admin"
+    display_name: str | None = None
+
+
+class AdminLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    staff_user: StaffUserInfo
+
+
+@router.post("/login", response_model=ApiResponse[AdminLoginResponse])
 def login(payload: AdminLoginRequest):
     token = create_access_token(subject=payload.username, token_type="admin", extra={"username": payload.username, "role": "admin"})
     return success_response({"access_token": token, "token_type": "Bearer", "staff_user": {"id": None, "username": payload.username, "role": "admin"}})

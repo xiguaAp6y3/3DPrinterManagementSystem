@@ -1,12 +1,16 @@
-from typing import Any
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
-from app.core.errors import register_exception_handlers
+from app.core.errors import COMMON_ERROR_RESPONSES, register_exception_handlers
 from app.schemas.response import ApiResponse, success_response
+
+
+class HealthStatus(BaseModel):
+    status: str
+    env: str
 
 
 def create_app() -> FastAPI:
@@ -16,6 +20,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
+        responses=COMMON_ERROR_RESPONSES,
     )
 
     app.add_middleware(
@@ -29,7 +34,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 
-    @app.get("/health", tags=["system"], response_model=ApiResponse[dict[str, Any]])
+    @app.get("/health", tags=["system"], response_model=ApiResponse[HealthStatus])
     def health():
         return success_response({"status": "ok", "env": settings.app_env})
 

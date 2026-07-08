@@ -35,24 +35,27 @@ class ScheduleCreate(BaseModel):
     material_locks: list[MaterialLockCreate] = Field(default_factory=list)
 
 
-class ScheduleItemUpdate(BaseModel):
+class ScheduleItemDetail(BaseModel):
+    id: int | None = None
+    schedule_order_id: int | None = None
+    print_task_id: int | None = None
     printer_id: int | None = None
     scheduled_start_at: datetime | None = None
     scheduled_end_at: datetime | None = None
-    status: ScheduleStatus | None = None
-    sort_order: int | None = None
+    status: ScheduleStatus = "scheduled"
+    sort_order: int = 0
 
 
 class ScheduleDetail(BaseModel):
     id: int | None = None
     schedule_no: str | None = None
     order_id: int
-    status: ScheduleStatus | str = "scheduled"
+    status: ScheduleStatus = "scheduled"
     planned_start_at: datetime | None = None
     planned_end_at: datetime | None = None
     due_at: datetime | None = None
     priority: int = 0
-    items: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[ScheduleItemDetail] = Field(default_factory=list)
     material_locks: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -83,6 +86,3 @@ def cancel_schedule(schedule_order_id: int, _: dict = Depends(require_admin)):
     return success_response({"id": schedule_order_id, "schedule_no": f"SCH-{schedule_order_id}", "order_id": 0, "status": "cancelled", "items": [], "material_locks": []})
 
 
-@router.patch("/items/{schedule_item_id}", response_model=ApiResponse[dict[str, Any]])
-def update_schedule_item(schedule_item_id: int, payload: ScheduleItemUpdate, _: dict = Depends(require_admin)):
-    return success_response({"id": schedule_item_id, **payload.model_dump(exclude_none=True)})

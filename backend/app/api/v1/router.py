@@ -4,11 +4,14 @@ from app.api.v1.admin_routes import (
     auth as admin_auth,
     custom_requests as admin_custom_requests,
     dashboard,
+    files as admin_files,
     inventory,
     orders as admin_orders,
     printers,
     print_tasks,
+    production_schedule_items,
     product_categories as admin_product_categories,
+    product_images,
     products as admin_products,
     quotes as admin_quotes,
     schedules,
@@ -41,7 +44,10 @@ api_v1_router.include_router(admin_products.router, prefix="/admin/products", ta
 api_v1_router.include_router(admin_orders.router, prefix="/admin/orders", tags=["admin-orders"])
 api_v1_router.include_router(admin_custom_requests.router, prefix="/admin/custom-requests", tags=["admin-custom-requests"])
 api_v1_router.include_router(admin_quotes.router, prefix="/admin", tags=["admin-quotes"])
+api_v1_router.include_router(admin_files.router, prefix="/admin/files", tags=["admin-files"])
 api_v1_router.include_router(print_tasks.router, prefix="/admin/print-tasks", tags=["admin-print-tasks"])
 api_v1_router.include_router(printers.router, prefix="/admin/printers", tags=["admin-printers"])
+api_v1_router.include_router(product_images.router, prefix="/admin/product-images", tags=["admin-product-images"])
 api_v1_router.include_router(schedules.router, prefix="/admin/production-schedule-orders", tags=["admin-schedules"])
+api_v1_router.include_router(production_schedule_items.router, prefix="/admin/production-schedule-items", tags=["admin-schedule-items"])
 api_v1_router.include_router(inventory.router, prefix="/admin/inventory", tags=["admin-inventory"])

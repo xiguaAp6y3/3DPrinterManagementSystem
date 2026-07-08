@@ -75,3 +75,5 @@ desktop.ini
 *.fbx
 
 # Keep source design docs and SQL scripts tracked.
+
+/Design
