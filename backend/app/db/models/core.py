@@ -18,10 +18,15 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    phone: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(30), index=True)
     nickname: Mapped[str | None] = mapped_column(String(100))
     avatar_url: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(50), default="active")
+    email_verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
 
 
 class StaffUser(Base, TimestampMixin):
@@ -29,11 +34,13 @@ class StaffUser(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(50), default="admin")
     status: Mapped[str] = mapped_column(String(50), default="active")
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
 
 
 class AuthRefreshToken(Base):
@@ -200,6 +207,9 @@ class Order(Base, TimestampMixin):
     payment_confirmed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     customer_note: Mapped[str | None] = mapped_column(String(1000))
     admin_note: Mapped[str | None] = mapped_column(String(1000))
+    receiver_name: Mapped[str | None] = mapped_column(String(100))
+    receiver_phone: Mapped[str | None] = mapped_column(String(50))
+    receiver_address: Mapped[str | None] = mapped_column(String(1000))
     row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
@@ -214,6 +224,9 @@ class OrderItem(Base):
     item_name: Mapped[str] = mapped_column(String(200))
     unit_price: Mapped[float] = mapped_column(Numeric(18, 2))
     quantity: Mapped[int] = mapped_column(Integer)
+    produced_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    inbounded_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    shipped_quantity: Mapped[int] = mapped_column(Integer, default=0)
     subtotal: Mapped[float] = mapped_column(Numeric(18, 2))
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
 
@@ -249,6 +262,7 @@ class PrintTask(Base, TimestampMixin):
     slice_file_id: Mapped[int | None] = mapped_column(ForeignKey("model_files.id"))
     material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id"))
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    warehouse_status: Mapped[str] = mapped_column(String(50), default="not_required", index=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     plate_count: Mapped[int] = mapped_column(Integer, default=1)
     use_ams: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -334,6 +348,128 @@ class FinishedGoodsInventory(Base):
     in_progress_quantity: Mapped[int] = mapped_column(Integer, default=0)
     warehouse_location: Mapped[str | None] = mapped_column(String(200))
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+
+
+class Warehouse(Base, TimestampMixin):
+    __tablename__ = "warehouses"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    warehouse_code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    remark: Mapped[str | None] = mapped_column(String(1000))
+
+
+class WarehouseLocation(Base, TimestampMixin):
+    __tablename__ = "warehouse_locations"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    location_code: Mapped[str] = mapped_column(String(50), index=True)
+    name: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    remark: Mapped[str | None] = mapped_column(String(1000))
+
+
+class WarehouseStockItem(Base, TimestampMixin):
+    __tablename__ = "warehouse_stock_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    stock_item_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_locations.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    order_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"))
+    print_task_id: Mapped[int | None] = mapped_column(ForeignKey("print_tasks.id"), index=True)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("product_skus.id"))
+    custom_request_id: Mapped[int | None] = mapped_column(ForeignKey("custom_requests.id"))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(50), default="available", index=True)
+    inbounded_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    outbounded_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+
+class WarehouseInboundRecord(Base):
+    __tablename__ = "warehouse_inbound_records"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    inbound_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    inbound_type: Mapped[str] = mapped_column(String(50), default="production_completed")
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_locations.id"))
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    order_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"))
+    print_task_id: Mapped[int | None] = mapped_column(ForeignKey("print_tasks.id"), index=True)
+    stock_item_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_stock_items.id"))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
+    remark: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+
+
+class Shipment(Base, TimestampMixin):
+    __tablename__ = "shipments"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    shipment_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="ready", index=True)
+    receiver_name: Mapped[str | None] = mapped_column(String(100))
+    receiver_phone: Mapped[str | None] = mapped_column(String(50))
+    receiver_address: Mapped[str | None] = mapped_column(String(1000))
+    remark: Mapped[str | None] = mapped_column(String(1000))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
+
+
+class ShipmentPackage(Base, TimestampMixin):
+    __tablename__ = "shipment_packages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id"), index=True)
+    package_no: Mapped[str] = mapped_column(String(50), index=True)
+    carrier_code: Mapped[str | None] = mapped_column(String(50))
+    carrier_name: Mapped[str | None] = mapped_column(String(100))
+    tracking_no: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="ready", index=True)
+
+
+class ShipmentItem(Base):
+    __tablename__ = "shipment_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id"), index=True)
+    package_id: Mapped[int | None] = mapped_column(ForeignKey("shipment_packages.id"))
+    stock_item_id: Mapped[int] = mapped_column(ForeignKey("warehouse_stock_items.id"), index=True)
+    order_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+
+
+class WarehouseOutboundRecord(Base, TimestampMixin):
+    __tablename__ = "warehouse_outbound_records"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    outbound_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
+    outbound_type: Mapped[str] = mapped_column(String(50), default="shipment")
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
+    confirmed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    remark: Mapped[str | None] = mapped_column(String(1000))
+
+
+class WarehouseOutboundItem(Base):
+    __tablename__ = "warehouse_outbound_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    outbound_id: Mapped[int] = mapped_column(ForeignKey("warehouse_outbound_records.id"), index=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id"), index=True)
+    package_id: Mapped[int | None] = mapped_column(ForeignKey("shipment_packages.id"))
+    stock_item_id: Mapped[int] = mapped_column(ForeignKey("warehouse_stock_items.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
 
 
 class InventoryLock(Base):

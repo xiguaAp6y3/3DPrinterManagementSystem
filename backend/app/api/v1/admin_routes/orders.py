@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
-from app.db.models.core import Order, OrderItem, PrintTask, ProductionScheduleOrder
+from app.db.models.core import Order, OrderItem, PrintTask, ProductionScheduleOrder, Shipment, ShipmentPackage
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import paginate, require_entity, to_float
@@ -15,7 +15,7 @@ from app.services.db_helpers import paginate, require_entity, to_float
 router = APIRouter()
 
 OrderType = Literal["listed_product", "custom"]
-OrderStatus = Literal["submitted", "reviewing", "quoted", "quote_confirmed", "payment_confirmed", "scheduled", "printing", "post_processing", "quality_check", "completed", "cancelled"]
+OrderStatus = Literal["submitted", "reviewing", "quoted", "quote_confirmed", "payment_confirmed", "scheduled", "printing", "post_processing", "quality_check", "partially_completed", "completed", "partially_inbound", "in_warehouse", "ready_to_ship", "shipping", "partially_shipped", "shipped", "cancelled"]
 PaymentStatus = Literal["unconfirmed", "confirmed", "cancelled"]
 
 
@@ -41,6 +41,7 @@ class OrderDetail(BaseModel):
     items: list[dict[str, Any]] = Field(default_factory=list)
     schedules: list[dict[str, Any]] = Field(default_factory=list)
     print_tasks: list[dict[str, Any]] = Field(default_factory=list)
+    shipments: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime | None = None
 
 
@@ -108,6 +109,7 @@ def serialize_order_detail(db: Session, order: Order, shallow: bool = False) -> 
         "items": [],
         "schedules": [],
         "print_tasks": [],
+        "shipments": [],
         "created_at": order.created_at,
     }
     if shallow:
@@ -124,10 +126,34 @@ def serialize_order_detail(db: Session, order: Order, shallow: bool = False) -> 
             "item_name": item.item_name,
             "unit_price": to_float(item.unit_price) or 0,
             "quantity": item.quantity,
+            "produced_quantity": item.produced_quantity,
+            "inbounded_quantity": item.inbounded_quantity,
+            "shipped_quantity": item.shipped_quantity,
             "subtotal": to_float(item.subtotal) or 0,
         }
         for item in items
     ]
     data["schedules"] = [{"id": item.id, "schedule_no": item.schedule_no, "status": item.status} for item in schedules]
-    data["print_tasks"] = [{"id": item.id, "task_no": item.task_no, "status": item.status} for item in print_tasks]
+    data["print_tasks"] = [{"id": item.id, "task_no": item.task_no, "status": item.status, "warehouse_status": item.warehouse_status} for item in print_tasks]
+    data["shipments"] = [serialize_shipment(db, item) for item in db.scalars(select(Shipment).where(Shipment.order_id == order.id).order_by(Shipment.created_at.desc())).all()]
     return data
+
+
+def serialize_shipment(db: Session, shipment: Shipment) -> dict[str, Any]:
+    packages = db.scalars(select(ShipmentPackage).where(ShipmentPackage.shipment_id == shipment.id).order_by(ShipmentPackage.id)).all()
+    return {
+        "id": shipment.id,
+        "shipment_no": shipment.shipment_no,
+        "status": shipment.status,
+        "packages": [
+            {
+                "id": package.id,
+                "package_no": package.package_no,
+                "carrier_code": package.carrier_code,
+                "carrier_name": package.carrier_name,
+                "tracking_no": package.tracking_no,
+                "status": package.status,
+            }
+            for package in packages
+        ],
+    }

@@ -15,6 +15,9 @@ from app.api.v1.admin_routes import (
     products as admin_products,
     quotes as admin_quotes,
     schedules,
+    staff_users,
+    users,
+    warehouse,
 )
 from app.api.v1.app_routes import (
     auth as app_auth,
@@ -41,6 +44,8 @@ api_v1_router.include_router(custom_requests.router, prefix="/app/custom-request
 api_v1_router.include_router(quotes.router, prefix="/app/quotes", tags=["app-quotes"])
 
 api_v1_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["admin-auth"])
+api_v1_router.include_router(users.router, prefix="/admin/users", tags=["admin-users"])
+api_v1_router.include_router(staff_users.router, prefix="/admin/staff-users", tags=["admin-staff-users"])
 api_v1_router.include_router(dashboard.router, prefix="/admin/dashboard", tags=["admin-dashboard"])
 api_v1_router.include_router(admin_product_categories.router, prefix="/admin/product-categories", tags=["admin-product-categories"])
 api_v1_router.include_router(admin_products.router, prefix="/admin/products", tags=["admin-products"])
@@ -54,3 +59,4 @@ api_v1_router.include_router(product_images.router, prefix="/admin/product-image
 api_v1_router.include_router(schedules.router, prefix="/admin/production-schedule-orders", tags=["admin-schedules"])
 api_v1_router.include_router(production_schedule_items.router, prefix="/admin/production-schedule-items", tags=["admin-schedule-items"])
 api_v1_router.include_router(inventory.router, prefix="/admin/inventory", tags=["admin-inventory"])
+api_v1_router.include_router(warehouse.router, prefix="/admin", tags=["admin-warehouse"])

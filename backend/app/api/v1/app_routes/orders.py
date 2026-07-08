@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_app_user
-from app.db.models.core import Order, OrderItem, PrintTask, Product, ProductSku, ProductionScheduleOrder
+from app.db.models.core import Order, OrderItem, PrintTask, Product, ProductSku, ProductionScheduleOrder, Shipment, ShipmentPackage
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import next_no, paginate, require_entity, to_float
@@ -15,7 +15,7 @@ from app.services.db_helpers import next_no, paginate, require_entity, to_float
 router = APIRouter()
 
 OrderType = Literal["listed_product", "custom"]
-OrderStatus = Literal["submitted", "reviewing", "quoted", "quote_confirmed", "payment_confirmed", "scheduled", "printing", "post_processing", "quality_check", "completed", "cancelled"]
+OrderStatus = Literal["submitted", "reviewing", "quoted", "quote_confirmed", "payment_confirmed", "scheduled", "printing", "post_processing", "quality_check", "partially_completed", "completed", "partially_inbound", "in_warehouse", "ready_to_ship", "shipping", "partially_shipped", "shipped", "cancelled"]
 PaymentStatus = Literal["unconfirmed", "confirmed", "cancelled"]
 
 
@@ -47,6 +47,7 @@ class OrderDetail(OrderSummary):
     items: list[dict[str, Any]] = Field(default_factory=list)
     schedules: list[dict[str, Any]] = Field(default_factory=list)
     print_tasks: list[dict[str, Any]] = Field(default_factory=list)
+    shipments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @router.get("", response_model=ApiResponse[PageResponse[OrderSummary]])
@@ -72,6 +73,13 @@ def list_orders(page: int = 1, page_size: int = 20, order_type: OrderType | None
 def get_order(order_no: str, current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
     order = require_entity(db.scalar(select(Order).where(Order.order_no == order_no, Order.user_id == current_user["user"].id)), "订单不存在")
     return success_response(serialize_order_detail(db, order))
+
+
+@router.get("/{order_no}/shipments", response_model=ApiResponse[list[dict[str, Any]]])
+def get_order_shipments(order_no: str, current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
+    order = require_entity(db.scalar(select(Order).where(Order.order_no == order_no, Order.user_id == current_user["user"].id)), "订单不存在")
+    shipments = db.scalars(select(Shipment).where(Shipment.order_id == order.id).order_by(Shipment.created_at.desc())).all()
+    return success_response([serialize_shipment(db, item) for item in shipments])
 
 
 @router.post("/listed-product", response_model=ApiResponse[OrderSummary])
@@ -147,12 +155,40 @@ def serialize_order_detail(db: Session, order: Order) -> dict:
                     "item_name": item.item_name,
                     "unit_price": to_float(item.unit_price) or 0,
                     "quantity": item.quantity,
+                    "produced_quantity": item.produced_quantity,
+                    "inbounded_quantity": item.inbounded_quantity,
+                    "shipped_quantity": item.shipped_quantity,
                     "subtotal": to_float(item.subtotal) or 0,
                 }
                 for item in items
             ],
             "schedules": [{"id": item.id, "schedule_no": item.schedule_no, "status": item.status} for item in schedules],
-            "print_tasks": [{"id": item.id, "task_no": item.task_no, "status": item.status} for item in print_tasks],
+            "print_tasks": [{"id": item.id, "task_no": item.task_no, "status": item.status, "warehouse_status": item.warehouse_status} for item in print_tasks],
+            "shipments": [serialize_shipment(db, item) for item in db.scalars(select(Shipment).where(Shipment.order_id == order.id).order_by(Shipment.created_at.desc())).all()],
         }
     )
     return data
+
+
+def serialize_shipment(db: Session, shipment: Shipment) -> dict[str, Any]:
+    packages = db.scalars(select(ShipmentPackage).where(ShipmentPackage.shipment_id == shipment.id).order_by(ShipmentPackage.id)).all()
+    return {
+        "id": shipment.id,
+        "shipment_no": shipment.shipment_no,
+        "status": shipment.status,
+        "receiver_name": shipment.receiver_name,
+        "receiver_phone": shipment.receiver_phone,
+        "receiver_address": shipment.receiver_address,
+        "packages": [
+            {
+                "id": package.id,
+                "package_no": package.package_no,
+                "carrier_code": package.carrier_code,
+                "carrier_name": package.carrier_name,
+                "tracking_no": package.tracking_no,
+                "status": package.status,
+            }
+            for package in packages
+        ],
+        "created_at": shipment.created_at,
+    }

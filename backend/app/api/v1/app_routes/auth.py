@@ -1,25 +1,39 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.security import require_app_user
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, success_response
-from app.services.auth_service import app_login, logout, refresh_app_token, serialize_user
+from app.services.auth_service import app_demo_login, app_login, app_register, logout, refresh_app_token, serialize_user
 
 router = APIRouter()
 
 
 class AppLoginRequest(BaseModel):
-    phone: str
+    email: str
+    password: str
+
+
+class AppRegisterRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    nickname: str | None = None
+    phone: str | None = None
+
+
+class AppDemoLoginRequest(BaseModel):
+    phone: str | None = None
     code: str
 
 
 class AppUserInfo(BaseModel):
     id: int | None = None
+    email: str | None = None
     phone: str
     nickname: str | None = None
     avatar_url: str | None = None
+    status: str | None = None
 
 
 class AppLoginResponse(BaseModel):
@@ -45,7 +59,17 @@ class LogoutRequest(BaseModel):
 
 @router.post("/login", response_model=ApiResponse[AppLoginResponse])
 def login(payload: AppLoginRequest, db: Session = Depends(get_db)):
-    return success_response(app_login(db, payload.phone, payload.code))
+    return success_response(app_login(db, payload.email, payload.password))
+
+
+@router.post("/register", response_model=ApiResponse[AppLoginResponse])
+def register(payload: AppRegisterRequest, db: Session = Depends(get_db)):
+    return success_response(app_register(db, payload.email, payload.password, payload.nickname, payload.phone))
+
+
+@router.post("/login-demo", response_model=ApiResponse[AppLoginResponse])
+def login_demo(payload: AppDemoLoginRequest, db: Session = Depends(get_db)):
+    return success_response(app_demo_login(db, payload.phone, payload.code))
 
 
 @router.get("/me", response_model=ApiResponse[AppUserInfo])

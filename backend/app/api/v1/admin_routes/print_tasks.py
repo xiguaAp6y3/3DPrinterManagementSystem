@@ -44,6 +44,7 @@ class PrintTaskDetail(BaseModel):
     slice_file_id: int | None = None
     material_id: int | None = None
     status: PrintTaskStatus | str = "pending"
+    warehouse_status: str = "not_required"
     priority: int = 0
     plate_count: int = 1
     use_ams: bool = False
@@ -94,6 +95,8 @@ def update_print_task_status(task_id: int, payload: PrintTaskStatusUpdate, _: di
         task.started_at = datetime.utcnow()
     if payload.status in {"completed", "failed", "cancelled"}:
         task.finished_at = datetime.utcnow()
+    if payload.status == "completed" and task.warehouse_status == "not_required":
+        task.warehouse_status = "pending_inbound"
     if task.printer_id:
         printer = db.get(Printer, task.printer_id)
         if printer:
@@ -121,6 +124,7 @@ def serialize_task(task: PrintTask) -> dict:
         "slice_file_id": task.slice_file_id,
         "material_id": task.material_id,
         "status": task.status,
+        "warehouse_status": task.warehouse_status,
         "priority": task.priority,
         "plate_count": task.plate_count,
         "use_ams": task.use_ams,

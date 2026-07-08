@@ -1,22 +1,31 @@
 # 3DPMS
 
-3DPMS 是一个面向 3D 打印农场的管理系统，当前阶段聚焦后端与数据库能力。
+3DPMS 是一个面向 3D 打印农场的管理系统。当前仓库重点是后端 API 与 SQL Server 数据库，前端规划为 Flutter 多端。
 
-核心目标：
+## 当前能力
 
-- 电脑端后台集中管理上架商品、订单、库存、打印机状态、排期和打印任务。
-- 手机 APP 端支持客户浏览上架商品、提交个性化定制、查询订单和确认报价。
-- 后端本地运行 FastAPI 服务，通过 Caddy 将 API 暴露给外部访问。
+- 客户 APP：邮箱注册登录、商品浏览、上架商品下单、定制申请、文件上传、报价确认、订单和发货查询。
+- 管理后台：商品、SKU、商品图片、订单、定制审核、报价、收款确认、打印机、打印任务、排期、材料库存。
+- 仓库管理：仓库/库位、打印完成入库、成品库存件、发货单、多快递单号、批量出库。
+- 账号管理：后台客户账号 CRUD、后台管理员账号 CRUD，后台账号管理仅 `super_admin` 可操作。
+- API 文档：FastAPI 自动生成 Swagger / OpenAPI。
 
-当前实现以 API 契约和数据库基线为主，业务接口仍是骨架返回，下一步需要接入 SQLAlchemy service 和 SQL Server 事务。
+最新 OpenAPI 规模：
+
+```text
+paths: 91
+operations: 121
+```
 
 ## 技术栈
 
 - Python 3.13
 - FastAPI
-- SQL Server
 - SQLAlchemy 2.x
+- SQL Server / Azure SQL
 - pyodbc
+- JWT + refresh token
+- pwdlib[argon2]
 - Caddy
 - Flutter 多端前端规划
 
@@ -24,9 +33,9 @@
 
 ```text
 backend/          FastAPI 后端项目
-deploy/sql/       SQL Server 建库、建表、触发器、开发种子脚本
+deploy/sql/       SQL Server 建表、触发器、开发种子脚本
 deploy/caddy/     Caddy 反向代理配置
-Design/           阶段路线图、数据库设计、API 缺口分析文档
+Design/           路线图、数据库设计、API 可用性报告
 ```
 
 ## 快速开始
@@ -53,14 +62,43 @@ http://127.0.0.1:5000/openapi.json
 3DPMS
 ```
 
-SQL 脚本不使用 `USE` 切换数据库。执行库内对象脚本前，请在 SQL Server 客户端中新建连接并直接连接到 `3DPMS`。
+当前 SQL 脚本不使用 `USE` 切换数据库。执行脚本前，请在 SQL Server 客户端中新建连接，并直接连接到 `3DPMS`。
 
-中文字段优先使用 SQL Server `NVARCHAR`，SQL 字符串使用 `N'中文'`，避免中文乱码。
+清空数据库后，推荐按顺序执行：
 
-## 当前开发重点
+```text
+deploy/sql/001_create_tables.sql
+deploy/sql/002_create_triggers.sql
+deploy/sql/003_seed_dev.sql
+```
 
-1. 将 API 骨架接入数据库查询和事务。
-2. 实现幂等键落库与重复请求返回。
-3. 完成上架商品下单、定制审核、人工报价、报价确认、人工收款确认。
-4. 完成订单排期、打印任务拆分、材料库存锁定/消耗/释放。
-5. 补充接口测试和 OpenAPI 示例。
+默认开发管理员：
+
+```text
+username: admin
+password: admin123456
+role: super_admin
+```
+
+中文字段使用 SQL Server `NVARCHAR`，SQL 字符串使用 `N'中文'`，不依赖 `_UTF8` collation。
+
+## 当前验证状态
+
+已完成：
+
+```text
+python -m compileall app
+OpenAPI 导出到 D:\openapi.json
+```
+
+尚需在清库重建后执行完整 HTTP 链路验收：
+
+```text
+注册 -> 登录 -> 下单 -> 收款确认 -> 排期/打印任务 -> 完成 -> 入库 -> 发货 -> 出库
+```
+
+## 重要文档
+
+- [后端 README](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/backend/README.md)
+- [API 运行可用性检测报告](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/API运行可用性检测报告.md)
+- [仓库管理与账号体系扩展路线图](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/仓库管理与账号体系扩展路线图.md)

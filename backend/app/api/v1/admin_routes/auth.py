@@ -18,8 +18,10 @@ class AdminLoginRequest(BaseModel):
 class StaffUserInfo(BaseModel):
     id: int | None = None
     username: str
+    email: str | None = None
     role: str = "admin"
     display_name: str | None = None
+    status: str | None = None
 
 
 class AdminLoginResponse(BaseModel):

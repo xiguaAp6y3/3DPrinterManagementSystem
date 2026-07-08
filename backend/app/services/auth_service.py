@@ -8,6 +8,7 @@ from app.core.errors import AppError
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    hash_password,
     hash_refresh_token,
     refresh_token_expires_at,
     verify_password,
@@ -21,9 +22,11 @@ DEMO_APP_LOGIN_CODE = "123456"
 def serialize_user(user: User) -> dict:
     return {
         "id": user.id,
+        "email": user.email,
         "phone": user.phone,
         "nickname": user.nickname,
         "avatar_url": user.avatar_url,
+        "status": user.status,
     }
 
 
@@ -31,8 +34,10 @@ def serialize_staff_user(staff_user: StaffUser) -> dict:
     return {
         "id": staff_user.id,
         "username": staff_user.username,
+        "email": staff_user.email,
         "role": staff_user.role,
         "display_name": staff_user.display_name,
+        "status": staff_user.status,
     }
 
 
@@ -40,7 +45,7 @@ def _create_app_access_token(user: User) -> str:
     return create_access_token(
         subject=str(user.id),
         token_type="app",
-        extra={"user_id": user.id, "phone": user.phone},
+        extra={"user_id": user.id, "email": user.email},
     )
 
 
@@ -66,13 +71,71 @@ def _save_refresh_token(db: Session, subject_type: str, user_id: int | None = No
     return refresh_token
 
 
-def app_login(db: Session, phone: str, code: str) -> dict:
+def app_register(db: Session, email: str, password: str, nickname: str | None = None, phone: str | None = None) -> dict:
+    normalized_email = email.strip().lower()
+    if "@" not in normalized_email or "." not in normalized_email.rsplit("@", 1)[-1]:
+        raise AppError("VALIDATION_ERROR", "邮箱格式不正确", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    existing = db.scalar(select(User).where(User.email == normalized_email))
+    if existing is not None:
+        raise AppError("AUTH_EMAIL_EXISTS", "邮箱已注册", status.HTTP_409_CONFLICT)
+    if phone:
+        existing_phone = db.scalar(select(User).where(User.phone == phone))
+        if existing_phone is not None:
+            raise AppError("AUTH_PHONE_EXISTS", "手机号已存在", status.HTTP_409_CONFLICT)
+
+    user = User(
+        email=normalized_email,
+        password_hash=hash_password(password),
+        phone=phone,
+        nickname=nickname or "用户",
+        status="active",
+    )
+    db.add(user)
+    db.flush()
+    access_token = _create_app_access_token(user)
+    refresh_token = _save_refresh_token(db, "app", user_id=user.id)
+    db.commit()
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "Bearer",
+        "user": serialize_user(user),
+    }
+
+
+def app_login(db: Session, email: str, password: str) -> dict:
+    normalized_email = email.strip().lower()
+    user = db.scalar(select(User).where(User.email == normalized_email))
+    if user is None or not user.password_hash or not verify_password(password, user.password_hash):
+        raise AppError("AUTH_INVALID_CREDENTIALS", "邮箱或密码错误", status.HTTP_401_UNAUTHORIZED)
+    if user.status != "active":
+        raise AppError("AUTH_FORBIDDEN", "客户账号不可用", status.HTTP_403_FORBIDDEN)
+
+    user.last_login_at = datetime.utcnow()
+    access_token = _create_app_access_token(user)
+    refresh_token = _save_refresh_token(db, "app", user_id=user.id)
+    db.commit()
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "Bearer",
+        "user": serialize_user(user),
+    }
+
+
+def app_demo_login(db: Session, phone: str, code: str) -> dict:
     if code != DEMO_APP_LOGIN_CODE:
         raise AppError("AUTH_INVALID_CODE", "验证码错误，Demo 固定验证码为 123456", status.HTTP_401_UNAUTHORIZED)
 
     user = db.scalar(select(User).where(User.phone == phone))
     if user is None:
-        user = User(phone=phone, nickname="用户", status="active")
+        user = User(
+            email=f"demo-{phone}@local.3dpms",
+            password_hash=hash_password(create_refresh_token()),
+            phone=phone,
+            nickname="用户",
+            status="active",
+        )
         db.add(user)
         db.flush()
     elif user.status != "active":
@@ -90,7 +153,8 @@ def app_login(db: Session, phone: str, code: str) -> dict:
 
 
 def admin_login(db: Session, username: str, password: str) -> dict:
-    staff_user = db.scalar(select(StaffUser).where(StaffUser.username == username))
+    login_name = username.strip()
+    staff_user = db.scalar(select(StaffUser).where((StaffUser.username == login_name) | (StaffUser.email == login_name.lower())))
     if staff_user is None or not verify_password(password, staff_user.password_hash):
         raise AppError("AUTH_INVALID_CREDENTIALS", "用户名或密码错误", status.HTTP_401_UNAUTHORIZED)
     if staff_user.status != "active":

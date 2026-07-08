@@ -8,32 +8,44 @@ CREATE SEQUENCE dbo.seq_custom_request_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_quote_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_print_task_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_schedule_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_stock_item_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_inbound_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_shipment_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_outbound_no AS BIGINT START WITH 1 INCREMENT BY 1;
 GO
 
 CREATE TABLE dbo.users (
     id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-    phone NVARCHAR(30) NOT NULL,
+    email NVARCHAR(255) NOT NULL,
+    password_hash NVARCHAR(255) NOT NULL,
+    phone NVARCHAR(30) NULL,
     nickname NVARCHAR(100) NULL,
     avatar_url NVARCHAR(500) NULL,
     status NVARCHAR(50) NOT NULL CONSTRAINT DF_users_status DEFAULT N'active',
+    email_verified_at DATETIME2(3) NULL,
+    last_login_at DATETIME2(3) NULL,
+    deleted_at DATETIME2(3) NULL,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_users_created_at DEFAULT SYSUTCDATETIME(),
     updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_users_updated_at DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT UQ_users_phone UNIQUE (phone),
-    CONSTRAINT CK_users_status CHECK (status IN (N'active', N'disabled'))
+    CONSTRAINT UQ_users_email UNIQUE (email),
+    CONSTRAINT CK_users_status CHECK (status IN (N'active', N'disabled', N'deleted'))
 );
 
 CREATE TABLE dbo.staff_users (
     id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     username NVARCHAR(100) NOT NULL,
+    email NVARCHAR(255) NULL,
     password_hash NVARCHAR(255) NOT NULL,
     display_name NVARCHAR(100) NULL,
     role NVARCHAR(50) NOT NULL CONSTRAINT DF_staff_users_role DEFAULT N'admin',
     status NVARCHAR(50) NOT NULL CONSTRAINT DF_staff_users_status DEFAULT N'active',
     last_login_at DATETIME2(3) NULL,
+    deleted_at DATETIME2(3) NULL,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_staff_users_created_at DEFAULT SYSUTCDATETIME(),
     updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_staff_users_updated_at DEFAULT SYSUTCDATETIME(),
     CONSTRAINT UQ_staff_users_username UNIQUE (username),
-    CONSTRAINT CK_staff_users_status CHECK (status IN (N'active', N'disabled'))
+    CONSTRAINT CK_staff_users_role CHECK (role IN (N'super_admin', N'admin', N'production_manager', N'warehouse_manager', N'customer_service')),
+    CONSTRAINT CK_staff_users_status CHECK (status IN (N'active', N'disabled', N'deleted'))
 );
 
 CREATE TABLE dbo.auth_refresh_tokens (
@@ -232,6 +244,9 @@ CREATE TABLE dbo.orders (
     payment_confirmed_at DATETIME2(3) NULL,
     customer_note NVARCHAR(1000) NULL,
     admin_note NVARCHAR(1000) NULL,
+    receiver_name NVARCHAR(100) NULL,
+    receiver_phone NVARCHAR(50) NULL,
+    receiver_address NVARCHAR(1000) NULL,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_orders_created_at DEFAULT SYSUTCDATETIME(),
     updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_orders_updated_at DEFAULT SYSUTCDATETIME(),
     row_version ROWVERSION NOT NULL,
@@ -239,7 +254,7 @@ CREATE TABLE dbo.orders (
     CONSTRAINT FK_orders_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
     CONSTRAINT FK_orders_payment_confirmed_by FOREIGN KEY (payment_confirmed_by) REFERENCES dbo.staff_users(id),
     CONSTRAINT CK_orders_type CHECK (order_type IN (N'listed_product', N'custom')),
-    CONSTRAINT CK_orders_status CHECK (status IN (N'submitted', N'reviewing', N'quoted', N'quote_confirmed', N'payment_confirmed', N'scheduled', N'printing', N'post_processing', N'quality_check', N'completed', N'cancelled')),
+    CONSTRAINT CK_orders_status CHECK (status IN (N'submitted', N'reviewing', N'quoted', N'quote_confirmed', N'payment_confirmed', N'scheduled', N'printing', N'post_processing', N'quality_check', N'partially_completed', N'completed', N'partially_inbound', N'in_warehouse', N'ready_to_ship', N'shipping', N'partially_shipped', N'shipped', N'cancelled')),
     CONSTRAINT CK_orders_payment_status CHECK (payment_status IN (N'unconfirmed', N'confirmed', N'cancelled'))
 );
 
@@ -279,13 +294,16 @@ CREATE TABLE dbo.order_items (
     item_name NVARCHAR(200) NOT NULL,
     unit_price DECIMAL(18,2) NOT NULL,
     quantity INT NOT NULL,
+    produced_quantity INT NOT NULL CONSTRAINT DF_order_items_produced_quantity DEFAULT 0,
+    inbounded_quantity INT NOT NULL CONSTRAINT DF_order_items_inbounded_quantity DEFAULT 0,
+    shipped_quantity INT NOT NULL CONSTRAINT DF_order_items_shipped_quantity DEFAULT 0,
     subtotal DECIMAL(18,2) NOT NULL,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_order_items_created_at DEFAULT SYSUTCDATETIME(),
     CONSTRAINT FK_order_items_order FOREIGN KEY (order_id) REFERENCES dbo.orders(id),
     CONSTRAINT FK_order_items_product FOREIGN KEY (product_id) REFERENCES dbo.products(id),
     CONSTRAINT FK_order_items_sku FOREIGN KEY (sku_id) REFERENCES dbo.product_skus(id),
     CONSTRAINT FK_order_items_custom_request FOREIGN KEY (custom_request_id) REFERENCES dbo.custom_requests(id),
-    CONSTRAINT CK_order_items_quantity CHECK (quantity > 0),
+    CONSTRAINT CK_order_items_quantity CHECK (quantity > 0 AND produced_quantity >= 0 AND inbounded_quantity >= 0 AND shipped_quantity >= 0),
     CONSTRAINT CK_order_items_amount CHECK (unit_price >= 0 AND subtotal >= 0)
 );
 
@@ -298,6 +316,7 @@ CREATE TABLE dbo.print_tasks (
     slice_file_id BIGINT NULL,
     material_id BIGINT NULL,
     status NVARCHAR(50) NOT NULL CONSTRAINT DF_print_tasks_status DEFAULT N'pending',
+    warehouse_status NVARCHAR(50) NOT NULL CONSTRAINT DF_print_tasks_warehouse_status DEFAULT N'not_required',
     priority INT NOT NULL CONSTRAINT DF_print_tasks_priority DEFAULT 0,
     plate_count INT NOT NULL CONSTRAINT DF_print_tasks_plate_count DEFAULT 1,
     use_ams BIT NOT NULL CONSTRAINT DF_print_tasks_use_ams DEFAULT 0,
@@ -315,6 +334,7 @@ CREATE TABLE dbo.print_tasks (
     CONSTRAINT FK_print_tasks_slice_file FOREIGN KEY (slice_file_id) REFERENCES dbo.model_files(id),
     CONSTRAINT FK_print_tasks_material FOREIGN KEY (material_id) REFERENCES dbo.materials(id),
     CONSTRAINT CK_print_tasks_status CHECK (status IN (N'pending', N'scheduled', N'printing', N'paused', N'completed', N'failed', N'cancelled')),
+    CONSTRAINT CK_print_tasks_warehouse_status CHECK (warehouse_status IN (N'not_required', N'pending_inbound', N'inbounded', N'outbounded')),
     CONSTRAINT CK_print_tasks_plate_count CHECK (plate_count > 0)
 );
 
@@ -387,6 +407,169 @@ CREATE TABLE dbo.finished_goods_inventory (
     CONSTRAINT FK_finished_goods_sku FOREIGN KEY (sku_id) REFERENCES dbo.product_skus(id),
     CONSTRAINT FK_finished_goods_order FOREIGN KEY (order_id) REFERENCES dbo.orders(id),
     CONSTRAINT CK_finished_goods_quantity CHECK (available_quantity >= 0 AND reserved_quantity >= 0 AND in_progress_quantity >= 0)
+);
+
+CREATE TABLE dbo.warehouses (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    warehouse_code NVARCHAR(50) NOT NULL,
+    name NVARCHAR(100) NOT NULL,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_warehouses_status DEFAULT N'active',
+    remark NVARCHAR(1000) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouses_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouses_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_warehouses_code UNIQUE (warehouse_code),
+    CONSTRAINT CK_warehouses_status CHECK (status IN (N'active', N'disabled'))
+);
+
+CREATE TABLE dbo.warehouse_locations (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    warehouse_id BIGINT NOT NULL,
+    location_code NVARCHAR(50) NOT NULL,
+    name NVARCHAR(100) NULL,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_warehouse_locations_status DEFAULT N'active',
+    remark NVARCHAR(1000) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_locations_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_locations_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_warehouse_locations_warehouse FOREIGN KEY (warehouse_id) REFERENCES dbo.warehouses(id),
+    CONSTRAINT UQ_warehouse_locations_code UNIQUE (warehouse_id, location_code),
+    CONSTRAINT CK_warehouse_locations_status CHECK (status IN (N'active', N'disabled'))
+);
+
+CREATE TABLE dbo.warehouse_stock_items (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    stock_item_no NVARCHAR(50) NOT NULL,
+    warehouse_id BIGINT NOT NULL,
+    location_id BIGINT NULL,
+    order_id BIGINT NOT NULL,
+    order_item_id BIGINT NULL,
+    print_task_id BIGINT NULL,
+    product_id BIGINT NULL,
+    sku_id BIGINT NULL,
+    custom_request_id BIGINT NULL,
+    quantity INT NOT NULL CONSTRAINT DF_warehouse_stock_items_quantity DEFAULT 1,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_warehouse_stock_items_status DEFAULT N'available',
+    inbounded_at DATETIME2(3) NULL,
+    outbounded_at DATETIME2(3) NULL,
+    created_by BIGINT NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_stock_items_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_stock_items_updated_at DEFAULT SYSUTCDATETIME(),
+    row_version ROWVERSION NOT NULL,
+    CONSTRAINT UQ_warehouse_stock_items_no UNIQUE (stock_item_no),
+    CONSTRAINT FK_warehouse_stock_items_warehouse FOREIGN KEY (warehouse_id) REFERENCES dbo.warehouses(id),
+    CONSTRAINT FK_warehouse_stock_items_location FOREIGN KEY (location_id) REFERENCES dbo.warehouse_locations(id),
+    CONSTRAINT FK_warehouse_stock_items_order FOREIGN KEY (order_id) REFERENCES dbo.orders(id),
+    CONSTRAINT FK_warehouse_stock_items_order_item FOREIGN KEY (order_item_id) REFERENCES dbo.order_items(id),
+    CONSTRAINT FK_warehouse_stock_items_print_task FOREIGN KEY (print_task_id) REFERENCES dbo.print_tasks(id),
+    CONSTRAINT FK_warehouse_stock_items_product FOREIGN KEY (product_id) REFERENCES dbo.products(id),
+    CONSTRAINT FK_warehouse_stock_items_sku FOREIGN KEY (sku_id) REFERENCES dbo.product_skus(id),
+    CONSTRAINT FK_warehouse_stock_items_custom_request FOREIGN KEY (custom_request_id) REFERENCES dbo.custom_requests(id),
+    CONSTRAINT FK_warehouse_stock_items_created_by FOREIGN KEY (created_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_warehouse_stock_items_quantity CHECK (quantity > 0),
+    CONSTRAINT CK_warehouse_stock_items_status CHECK (status IN (N'available', N'reserved', N'outbound', N'shipped', N'cancelled'))
+);
+
+CREATE TABLE dbo.warehouse_inbound_records (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    inbound_no NVARCHAR(50) NOT NULL,
+    inbound_type NVARCHAR(50) NOT NULL CONSTRAINT DF_warehouse_inbound_records_type DEFAULT N'production_completed',
+    warehouse_id BIGINT NOT NULL,
+    location_id BIGINT NULL,
+    order_id BIGINT NOT NULL,
+    order_item_id BIGINT NULL,
+    print_task_id BIGINT NULL,
+    stock_item_id BIGINT NULL,
+    quantity INT NOT NULL CONSTRAINT DF_warehouse_inbound_records_quantity DEFAULT 1,
+    operator_id BIGINT NULL,
+    remark NVARCHAR(1000) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_inbound_records_created_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_warehouse_inbound_records_no UNIQUE (inbound_no),
+    CONSTRAINT FK_warehouse_inbound_records_warehouse FOREIGN KEY (warehouse_id) REFERENCES dbo.warehouses(id),
+    CONSTRAINT FK_warehouse_inbound_records_location FOREIGN KEY (location_id) REFERENCES dbo.warehouse_locations(id),
+    CONSTRAINT FK_warehouse_inbound_records_order FOREIGN KEY (order_id) REFERENCES dbo.orders(id),
+    CONSTRAINT FK_warehouse_inbound_records_order_item FOREIGN KEY (order_item_id) REFERENCES dbo.order_items(id),
+    CONSTRAINT FK_warehouse_inbound_records_print_task FOREIGN KEY (print_task_id) REFERENCES dbo.print_tasks(id),
+    CONSTRAINT FK_warehouse_inbound_records_stock_item FOREIGN KEY (stock_item_id) REFERENCES dbo.warehouse_stock_items(id),
+    CONSTRAINT FK_warehouse_inbound_records_operator FOREIGN KEY (operator_id) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_warehouse_inbound_records_quantity CHECK (quantity > 0),
+    CONSTRAINT CK_warehouse_inbound_records_type CHECK (inbound_type IN (N'production_completed', N'manual_adjustment', N'return_inbound'))
+);
+
+CREATE TABLE dbo.shipments (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    shipment_no NVARCHAR(50) NOT NULL,
+    order_id BIGINT NOT NULL,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_shipments_status DEFAULT N'ready',
+    receiver_name NVARCHAR(100) NULL,
+    receiver_phone NVARCHAR(50) NULL,
+    receiver_address NVARCHAR(1000) NULL,
+    remark NVARCHAR(1000) NULL,
+    created_by BIGINT NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_shipments_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_shipments_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_shipments_no UNIQUE (shipment_no),
+    CONSTRAINT FK_shipments_order FOREIGN KEY (order_id) REFERENCES dbo.orders(id),
+    CONSTRAINT FK_shipments_created_by FOREIGN KEY (created_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_shipments_status CHECK (status IN (N'draft', N'ready', N'outbounded', N'cancelled'))
+);
+
+CREATE TABLE dbo.shipment_packages (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    shipment_id BIGINT NOT NULL,
+    package_no NVARCHAR(50) NOT NULL,
+    carrier_code NVARCHAR(50) NULL,
+    carrier_name NVARCHAR(100) NULL,
+    tracking_no NVARCHAR(100) NOT NULL,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_shipment_packages_status DEFAULT N'ready',
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_shipment_packages_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_shipment_packages_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_shipment_packages_shipment FOREIGN KEY (shipment_id) REFERENCES dbo.shipments(id),
+    CONSTRAINT CK_shipment_packages_status CHECK (status IN (N'ready', N'outbounded', N'cancelled'))
+);
+
+CREATE TABLE dbo.shipment_items (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    shipment_id BIGINT NOT NULL,
+    package_id BIGINT NULL,
+    stock_item_id BIGINT NOT NULL,
+    order_item_id BIGINT NULL,
+    quantity INT NOT NULL CONSTRAINT DF_shipment_items_quantity DEFAULT 1,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_shipment_items_created_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_shipment_items_shipment FOREIGN KEY (shipment_id) REFERENCES dbo.shipments(id),
+    CONSTRAINT FK_shipment_items_package FOREIGN KEY (package_id) REFERENCES dbo.shipment_packages(id),
+    CONSTRAINT FK_shipment_items_stock_item FOREIGN KEY (stock_item_id) REFERENCES dbo.warehouse_stock_items(id),
+    CONSTRAINT FK_shipment_items_order_item FOREIGN KEY (order_item_id) REFERENCES dbo.order_items(id),
+    CONSTRAINT CK_shipment_items_quantity CHECK (quantity > 0)
+);
+
+CREATE TABLE dbo.warehouse_outbound_records (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    outbound_no NVARCHAR(50) NOT NULL,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_warehouse_outbound_records_status DEFAULT N'draft',
+    outbound_type NVARCHAR(50) NOT NULL CONSTRAINT DF_warehouse_outbound_records_type DEFAULT N'shipment',
+    operator_id BIGINT NULL,
+    confirmed_at DATETIME2(3) NULL,
+    remark NVARCHAR(1000) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_outbound_records_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_outbound_records_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_warehouse_outbound_records_no UNIQUE (outbound_no),
+    CONSTRAINT FK_warehouse_outbound_records_operator FOREIGN KEY (operator_id) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_warehouse_outbound_records_status CHECK (status IN (N'draft', N'confirmed', N'cancelled')),
+    CONSTRAINT CK_warehouse_outbound_records_type CHECK (outbound_type IN (N'shipment', N'manual_adjustment'))
+);
+
+CREATE TABLE dbo.warehouse_outbound_items (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    outbound_id BIGINT NOT NULL,
+    shipment_id BIGINT NOT NULL,
+    package_id BIGINT NULL,
+    stock_item_id BIGINT NOT NULL,
+    quantity INT NOT NULL CONSTRAINT DF_warehouse_outbound_items_quantity DEFAULT 1,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_warehouse_outbound_items_created_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_warehouse_outbound_items_outbound FOREIGN KEY (outbound_id) REFERENCES dbo.warehouse_outbound_records(id),
+    CONSTRAINT FK_warehouse_outbound_items_shipment FOREIGN KEY (shipment_id) REFERENCES dbo.shipments(id),
+    CONSTRAINT FK_warehouse_outbound_items_package FOREIGN KEY (package_id) REFERENCES dbo.shipment_packages(id),
+    CONSTRAINT FK_warehouse_outbound_items_stock_item FOREIGN KEY (stock_item_id) REFERENCES dbo.warehouse_stock_items(id),
+    CONSTRAINT CK_warehouse_outbound_items_quantity CHECK (quantity > 0)
 );
 
 CREATE TABLE dbo.inventory_locks (
@@ -468,6 +651,8 @@ CREATE TABLE dbo.operation_logs (
 GO
 
 CREATE INDEX IX_products_status ON dbo.products(sales_status, is_deleted, sort_order);
+CREATE UNIQUE INDEX UX_users_phone_not_null ON dbo.users(phone) WHERE phone IS NOT NULL;
+CREATE UNIQUE INDEX UX_staff_users_email_not_null ON dbo.staff_users(email) WHERE email IS NOT NULL;
 CREATE INDEX IX_product_skus_product_status ON dbo.product_skus(product_id, status);
 CREATE INDEX IX_product_images_product_type ON dbo.product_images(product_id, image_type, sort_order);
 CREATE INDEX IX_auth_refresh_tokens_user ON dbo.auth_refresh_tokens(user_id, expires_at);
@@ -480,9 +665,20 @@ CREATE INDEX IX_quotes_status_created ON dbo.quotes(status, created_at DESC);
 CREATE INDEX IX_printers_status ON dbo.printers(status);
 CREATE INDEX IX_print_tasks_order_status ON dbo.print_tasks(order_id, status);
 CREATE INDEX IX_print_tasks_printer_status ON dbo.print_tasks(printer_id, status);
+CREATE INDEX IX_print_tasks_warehouse_status ON dbo.print_tasks(warehouse_status, status);
 CREATE INDEX IX_schedule_orders_order_status ON dbo.production_schedule_orders(order_id, status);
 CREATE INDEX IX_schedule_items_printer_time ON dbo.production_schedule_items(printer_id, scheduled_start_at, scheduled_end_at);
 CREATE INDEX IX_inventory_locks_order_status ON dbo.inventory_locks(order_id, status);
 CREATE INDEX IX_inventory_locks_material_status ON dbo.inventory_locks(material_id, status);
 CREATE INDEX IX_materials_type_color_status ON dbo.materials(material_type, color, status);
+CREATE INDEX IX_warehouse_locations_warehouse_status ON dbo.warehouse_locations(warehouse_id, status);
+CREATE INDEX IX_warehouse_stock_items_order_status ON dbo.warehouse_stock_items(order_id, status);
+CREATE INDEX IX_warehouse_stock_items_task ON dbo.warehouse_stock_items(print_task_id);
+CREATE INDEX IX_warehouse_stock_items_location ON dbo.warehouse_stock_items(warehouse_id, location_id, status);
+CREATE INDEX IX_warehouse_inbound_records_order_created ON dbo.warehouse_inbound_records(order_id, created_at DESC);
+CREATE INDEX IX_shipments_order_status ON dbo.shipments(order_id, status);
+CREATE INDEX IX_shipment_packages_tracking ON dbo.shipment_packages(tracking_no);
+CREATE INDEX IX_shipment_items_stock_item ON dbo.shipment_items(stock_item_id);
+CREATE INDEX IX_warehouse_outbound_records_status_created ON dbo.warehouse_outbound_records(status, created_at DESC);
+CREATE INDEX IX_warehouse_outbound_items_stock_item ON dbo.warehouse_outbound_items(stock_item_id);
 GO
