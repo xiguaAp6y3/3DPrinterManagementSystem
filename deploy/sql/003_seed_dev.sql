@@ -1,7 +1,7 @@
 IF NOT EXISTS (SELECT 1 FROM dbo.staff_users WHERE username = N'admin')
 BEGIN
     INSERT INTO dbo.staff_users (username, password_hash, display_name, role)
-    VALUES (N'admin', N'CHANGE_ME_HASH', N'管理员', N'admin');
+    VALUES (N'admin', N'$argon2id$v=19$m=65536,t=3,p=4$XOJSBfXbP5bLF/anAcierA$ee9/Of+a7/UbpOlXBvUufhJ64GYqVWM6LI4SS1BTVxc', N'管理员', N'admin');
 END;
 
 IF NOT EXISTS (SELECT 1 FROM dbo.product_categories WHERE name = N'默认分类')

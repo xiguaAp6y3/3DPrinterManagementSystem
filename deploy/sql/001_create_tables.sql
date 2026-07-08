@@ -36,6 +36,25 @@ CREATE TABLE dbo.staff_users (
     CONSTRAINT CK_staff_users_status CHECK (status IN (N'active', N'disabled'))
 );
 
+CREATE TABLE dbo.auth_refresh_tokens (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    token_hash NVARCHAR(128) NOT NULL,
+    subject_type NVARCHAR(50) NOT NULL,
+    user_id BIGINT NULL,
+    staff_user_id BIGINT NULL,
+    expires_at DATETIME2(3) NOT NULL,
+    revoked_at DATETIME2(3) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_auth_refresh_tokens_created_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_auth_refresh_tokens_token_hash UNIQUE (token_hash),
+    CONSTRAINT FK_auth_refresh_tokens_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
+    CONSTRAINT FK_auth_refresh_tokens_staff FOREIGN KEY (staff_user_id) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_auth_refresh_tokens_subject_type CHECK (subject_type IN (N'app', N'admin')),
+    CONSTRAINT CK_auth_refresh_tokens_subject CHECK (
+        (subject_type = N'app' AND user_id IS NOT NULL AND staff_user_id IS NULL)
+        OR (subject_type = N'admin' AND staff_user_id IS NOT NULL AND user_id IS NULL)
+    )
+);
+
 CREATE TABLE dbo.product_categories (
     id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     name NVARCHAR(100) NOT NULL,
@@ -451,6 +470,8 @@ GO
 CREATE INDEX IX_products_status ON dbo.products(sales_status, is_deleted, sort_order);
 CREATE INDEX IX_product_skus_product_status ON dbo.product_skus(product_id, status);
 CREATE INDEX IX_product_images_product_type ON dbo.product_images(product_id, image_type, sort_order);
+CREATE INDEX IX_auth_refresh_tokens_user ON dbo.auth_refresh_tokens(user_id, expires_at);
+CREATE INDEX IX_auth_refresh_tokens_staff ON dbo.auth_refresh_tokens(staff_user_id, expires_at);
 CREATE INDEX IX_orders_user_created ON dbo.orders(user_id, created_at DESC);
 CREATE INDEX IX_orders_status_payment_created ON dbo.orders(status, payment_status, created_at DESC);
 CREATE INDEX IX_custom_requests_user_status_created ON dbo.custom_requests(user_id, status, created_at DESC);

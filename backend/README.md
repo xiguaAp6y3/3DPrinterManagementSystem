@@ -83,6 +83,13 @@ deploy/sql/002_create_triggers.sql
 deploy/sql/003_seed_dev.sql
 ```
 
+如果数据库已经执行过旧版 `001_create_tables.sql`，需要额外执行增量脚本：
+
+```text
+deploy/sql/004_auth_refresh_tokens.sql
+deploy/sql/005_update_demo_admin_password.sql
+```
+
 注意：
 
 - 库内对象脚本不包含 `USE 3DPMS`。
@@ -178,18 +185,37 @@ https://你的域名/api/v1/app/products
 
 ## 9. 认证说明
 
-当前登录接口仍是开发骨架：
+当前已实现登录 Demo：
 
-- 客户登录：未接真实验证码。
-- 管理员登录：未接真实密码校验。
-- JWT 已生成，但用户身份仍需后续接数据库。
+- 客户 APP 登录固定验证码：`123456`。
+- 新手机号登录会自动创建 `users` 账号。
+- 管理端登录读取 `staff_users` 并校验 Argon2 密码 hash。
+- 默认开发管理员：`admin / admin123456`。
+- 登录返回 `access_token` 和 `refresh_token`。
+- `/me` 使用 Bearer access token 查询当前身份。
+- `/refresh` 使用 refresh token 轮换并返回新的 access token 和 refresh token。
+- `/logout` 撤销 refresh token；已签发的 access token 等待自然过期。
 
-后续进入联调前，至少需要完成：
+Demo 调用顺序：
 
-- 用户表查询。
-- 管理员密码哈希校验。
-- 用户状态校验。
-- 角色权限校验。
+```text
+POST /api/v1/app/auth/login
+GET  /api/v1/app/auth/me
+POST /api/v1/app/auth/refresh
+POST /api/v1/app/auth/logout
+
+POST /api/v1/admin/auth/login
+GET  /api/v1/admin/auth/me
+POST /api/v1/admin/auth/refresh
+POST /api/v1/admin/auth/logout
+```
+
+生成新的管理员密码 hash：
+
+```powershell
+cd C:\Users\Gua3\Desktop\3DPrinterManagementSystem\backend
+.\.venv\Scripts\python.exe scripts\hash_password.py "你的新密码"
+```
 
 ## 10. 幂等要求
 
@@ -219,6 +245,9 @@ Idempotency-Key: 任意唯一字符串
 ### 客户 APP 端
 
 - `POST /api/v1/app/auth/login`
+- `GET /api/v1/app/auth/me`
+- `POST /api/v1/app/auth/refresh`
+- `POST /api/v1/app/auth/logout`
 - `GET /api/v1/app/product-categories`
 - `GET /api/v1/app/products`
 - `GET /api/v1/app/products/{product_id}`
@@ -240,6 +269,9 @@ Idempotency-Key: 任意唯一字符串
 ### 管理端
 
 - `POST /api/v1/admin/auth/login`
+- `GET /api/v1/admin/auth/me`
+- `POST /api/v1/admin/auth/refresh`
+- `POST /api/v1/admin/auth/logout`
 - `GET /api/v1/admin/dashboard`
 - `GET /api/v1/admin/product-categories`
 - `POST /api/v1/admin/product-categories`
@@ -339,11 +371,10 @@ Idempotency-Key: 任意唯一字符串
 
 ## 14. 下一步开发重点
 
-1. 实现真实登录和权限校验。
-2. 将订单、定制、报价、排期、库存接口接入 SQLAlchemy。
-3. 给关键写接口实现幂等键事务。
-4. 实现上架商品下单事务。
-5. 实现定制审核、人工报价、报价确认、人工收款确认。
-6. 实现排期主表/明细表、打印任务拆分和材料库存锁定。
-7. 补充 pytest 接口测试。
-8. 重新导出 `openapi.json` 并交给前端联调。
+1. 将订单、定制、报价、排期、库存接口接入 SQLAlchemy。
+2. 给关键写接口实现幂等键事务。
+3. 实现上架商品下单事务。
+4. 实现定制审核、人工报价、报价确认、人工收款确认。
+5. 实现排期主表/明细表、打印任务拆分和材料库存锁定。
+6. 补充 pytest 接口测试。
+7. 重新导出 `openapi.json` 并交给前端联调。

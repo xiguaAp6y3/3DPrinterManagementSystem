@@ -74,6 +74,5 @@ desktop.ini
 *.stp
 *.fbx
 
-# Keep source design docs and SQL scripts tracked.
-
-/Design
+# Keep source design docs, SQL scripts, and Caddy config tracked.
+/deploy/caddy/caddy.exe

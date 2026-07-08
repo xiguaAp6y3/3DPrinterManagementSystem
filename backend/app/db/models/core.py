@@ -36,6 +36,19 @@ class StaffUser(Base, TimestampMixin):
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
 
 
+class AuthRefreshToken(Base):
+    __tablename__ = "auth_refresh_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    subject_type: Mapped[str] = mapped_column(String(50), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    staff_user_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"), index=True)
+    expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), index=True)
+    revoked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+
+
 class ProductCategory(Base, TimestampMixin):
     __tablename__ = "product_categories"
 
