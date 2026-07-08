@@ -1,17 +1,24 @@
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import require_admin
+from app.db.models.core import Product, ProductImage, ProductSku
+from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
+from app.services.db_helpers import paginate, product_image_public_url, require_entity, safe_storage_name, storage_file_exists, to_float
 
 router = APIRouter()
 
 SalesStatus = Literal["draft", "on_sale", "off_sale", "sold_out", "archived"]
 SkuStatus = Literal["active", "inactive"]
-ImageType = Literal["cover", "detail", "finished", "scene"]
+ImageType = Literal["cover", "detail", "finished", "printed_sample", "scene"]
 
 
 class ProductCreate(BaseModel):
@@ -92,50 +99,171 @@ class ProductSkuList(BaseModel):
 
 
 @router.get("", response_model=ApiResponse[PageResponse[ProductItem]])
-def list_products(page: int = 1, page_size: int = 20, keyword: str | None = None, category_id: int | None = None, sales_status: SalesStatus | None = None, _: dict = Depends(require_admin)):
-    return paginated_response([], page, page_size, 0)
+def list_products(page: int = 1, page_size: int = 20, keyword: str | None = None, category_id: int | None = None, sales_status: SalesStatus | None = None, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    stmt = select(Product).where(Product.is_deleted == False).order_by(Product.sort_order, Product.id.desc())
+    if keyword:
+        stmt = stmt.where(or_(Product.name.contains(keyword), Product.description.contains(keyword)))
+    if category_id is not None:
+        stmt = stmt.where(Product.category_id == category_id)
+    if sales_status:
+        stmt = stmt.where(Product.sales_status == sales_status)
+    items, page, page_size, total = paginate(db, stmt, page, page_size)
+    return paginated_response([serialize_product(item, db) for item in items], page, page_size, total)
 
 
 @router.post("", response_model=ApiResponse[ProductItem])
-def create_product(payload: ProductCreate, _: dict = Depends(require_admin)):
-    return success_response({"id": None, **payload.model_dump()})
+def create_product(payload: ProductCreate, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    product = Product(**payload.model_dump())
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+    return success_response(serialize_product(product, db))
 
 
 @router.get("/{product_id}", response_model=ApiResponse[ProductItem])
-def get_product(product_id: int, _: dict = Depends(require_admin)):
-    return success_response({"id": product_id, "sales_status": "draft", "production_mode": "make_to_order"})
+def get_product(product_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    product = require_entity(db.get(Product, product_id), "商品不存在")
+    if product.is_deleted:
+        require_entity(None, "商品不存在")
+    return success_response(serialize_product(product, db))
 
 
 @router.patch("/{product_id}", response_model=ApiResponse[ProductItem])
-def update_product(product_id: int, payload: ProductUpdate, _: dict = Depends(require_admin)):
-    return success_response({"id": product_id, **payload.model_dump(exclude_none=True)})
+def update_product(product_id: int, payload: ProductUpdate, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    product = require_entity(db.get(Product, product_id), "商品不存在")
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(product, key, value)
+    db.commit()
+    db.refresh(product)
+    return success_response(serialize_product(product, db))
 
 
 @router.post("/{product_id}/images", response_model=ApiResponse[ProductImageItem])
-async def upload_product_image(product_id: int, image_type: ImageType = "detail", sort_order: int = 0, file: UploadFile = File(...), _: dict = Depends(require_admin)):
-    return success_response({"product_id": product_id, "file_name": file.filename, "image_type": image_type, "sort_order": sort_order})
+async def upload_product_image(product_id: int, image_type: ImageType = "detail", sort_order: int = 0, file: UploadFile = File(...), _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    product = require_entity(db.get(Product, product_id), "商品不存在")
+    stored_type = normalize_image_type(image_type)
+    directory = settings.upload_root / "product_images" / str(product_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f"{datetime.utcnow():%Y%m%d%H%M%S%f}_{safe_storage_name(file.filename or 'image')}"
+    storage_path = directory / filename
+    content = await file.read()
+    storage_path.write_bytes(content)
+    storage_key = str(storage_path.as_posix())
+    image = ProductImage(product_id=product.id, image_url=storage_key, image_type=stored_type, sort_order=sort_order)
+    db.add(image)
+    if stored_type == "cover":
+        product.cover_image_url = storage_key
+    db.commit()
+    db.refresh(image)
+    return success_response(serialize_image(image, file_name=file.filename))
 
 
 @router.get("/{product_id}/images", response_model=ApiResponse[ProductImageList])
-def list_product_images(product_id: int, _: dict = Depends(require_admin)):
-    return success_response({"product_id": product_id, "items": []})
+def list_product_images(product_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    require_entity(db.get(Product, product_id), "商品不存在")
+    images = db.scalars(select(ProductImage).where(ProductImage.product_id == product_id).order_by(ProductImage.sort_order, ProductImage.id)).all()
+    return success_response({"product_id": product_id, "items": [serialize_image(item) for item in images]})
 
 
 @router.patch("/{product_id}/sales-status", response_model=ApiResponse[ProductItem])
-def update_sales_status(product_id: int, payload: SalesStatusUpdate, _: dict = Depends(require_admin)):
-    return success_response({"id": product_id, "sales_status": payload.sales_status})
+def update_sales_status(product_id: int, payload: SalesStatusUpdate, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    product = require_entity(db.get(Product, product_id), "商品不存在")
+    product.sales_status = payload.sales_status
+    db.commit()
+    db.refresh(product)
+    return success_response(serialize_product(product, db))
 
 
 @router.get("/{product_id}/skus", response_model=ApiResponse[ProductSkuList])
-def list_skus(product_id: int, _: dict = Depends(require_admin)):
-    return success_response({"product_id": product_id, "items": []})
+def list_skus(product_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    require_entity(db.get(Product, product_id), "商品不存在")
+    skus = db.scalars(select(ProductSku).where(ProductSku.product_id == product_id).order_by(ProductSku.id)).all()
+    return success_response({"product_id": product_id, "items": [serialize_sku(item) for item in skus]})
 
 
 @router.post("/{product_id}/skus", response_model=ApiResponse[ProductSkuItem])
-def create_sku(product_id: int, payload: ProductSkuCreate, _: dict = Depends(require_admin)):
-    return success_response({"id": None, "product_id": product_id, **payload.model_dump()})
+def create_sku(product_id: int, payload: ProductSkuCreate, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    require_entity(db.get(Product, product_id), "商品不存在")
+    sku = ProductSku(product_id=product_id, **payload.model_dump())
+    db.add(sku)
+    db.commit()
+    db.refresh(sku)
+    return success_response(serialize_sku(sku))
 
 
 @router.patch("/skus/{sku_id}", response_model=ApiResponse[ProductSkuItem])
-def update_sku(sku_id: int, payload: ProductSkuCreate, _: dict = Depends(require_admin)):
-    return success_response({"id": sku_id, "product_id": 0, **payload.model_dump()})
+def update_sku(sku_id: int, payload: ProductSkuCreate, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    sku = require_entity(db.get(ProductSku, sku_id), "商品 SKU 不存在")
+    for key, value in payload.model_dump().items():
+        setattr(sku, key, value)
+    db.commit()
+    db.refresh(sku)
+    return success_response(serialize_sku(sku))
+
+
+def normalize_image_type(image_type: str) -> str:
+    return "printed_sample" if image_type == "finished" else image_type
+
+
+def serialize_product(product: Product, db: Session | None = None) -> dict:
+    return {
+        "id": product.id,
+        "category_id": product.category_id,
+        "name": product.name,
+        "description": product.description,
+        "cover_image_url": product_image_public_url(find_cover_image_id(db, product) if db else None),
+        "sales_status": product.sales_status,
+        "production_mode": product.production_mode,
+        "base_price": to_float(product.base_price) or 0,
+        "supports_custom_note": product.supports_custom_note,
+        "sort_order": product.sort_order,
+        "is_deleted": product.is_deleted,
+        "created_at": product.created_at,
+        "updated_at": product.updated_at,
+    }
+
+
+def serialize_sku(sku: ProductSku) -> dict:
+    return {
+        "id": sku.id,
+        "product_id": sku.product_id,
+        "material_id": sku.material_id,
+        "color": sku.color,
+        "size_label": sku.size_label,
+        "precision_level": sku.precision_level,
+        "price": to_float(sku.price) or 0,
+        "min_quantity": sku.min_quantity,
+        "max_quantity": sku.max_quantity,
+        "status": sku.status,
+    }
+
+
+def serialize_image(image: ProductImage, file_name: str | None = None) -> dict:
+    exists = storage_file_exists(image.image_url)
+    return {
+        "id": image.id,
+        "product_id": image.product_id,
+        "image_url": product_image_public_url(image.id) if exists else None,
+        "file_name": file_name or Path(image.image_url).name,
+        "image_type": image.image_type,
+        "sort_order": image.sort_order,
+        "status": "active" if exists else "missing",
+        "created_at": image.created_at,
+    }
+
+
+def find_cover_image_id(db: Session | None, product: Product) -> int | None:
+    if db is None:
+        return None
+    cover = db.scalar(
+        select(ProductImage)
+        .where(ProductImage.product_id == product.id, ProductImage.image_type == "cover")
+        .order_by(ProductImage.sort_order, ProductImage.id)
+    )
+    if cover and storage_file_exists(cover.image_url):
+        return cover.id
+    images = db.scalars(select(ProductImage).where(ProductImage.product_id == product.id).order_by(ProductImage.sort_order, ProductImage.id)).all()
+    for image in images:
+        if storage_file_exists(image.image_url):
+            return image.id
+    return None

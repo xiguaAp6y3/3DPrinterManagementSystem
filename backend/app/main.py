@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     )
 
     register_exception_handlers(app)
+    settings.upload_root.mkdir(parents=True, exist_ok=True)
     app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 
     @app.get("/health", tags=["system"], response_model=ApiResponse[HealthStatus])

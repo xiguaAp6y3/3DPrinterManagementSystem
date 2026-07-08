@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, FetchedValue, ForeignKey, Integer, LargeBinary, Numeric, Unicode as String, UnicodeText as Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -72,7 +72,7 @@ class Product(Base, TimestampMixin):
     supports_custom_note: Mapped[bool] = mapped_column(Boolean, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
     skus = relationship("ProductSku", back_populates="product")
     images = relationship("ProductImage", back_populates="product")
@@ -150,7 +150,7 @@ class CustomRequest(Base, TimestampMixin):
     reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     reviewed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     review_remark: Mapped[str | None] = mapped_column(String(1000))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class CustomRequestReview(Base):
@@ -183,7 +183,7 @@ class Quote(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(50), default="draft", index=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     confirmed_by_user_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class Order(Base, TimestampMixin):
@@ -200,7 +200,7 @@ class Order(Base, TimestampMixin):
     payment_confirmed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     customer_note: Mapped[str | None] = mapped_column(String(1000))
     admin_note: Mapped[str | None] = mapped_column(String(1000))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class OrderItem(Base):
@@ -235,7 +235,7 @@ class Printer(Base, TimestampMixin):
     api_endpoint: Mapped[str | None] = mapped_column(String(500))
     last_seen_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     remark: Mapped[str | None] = mapped_column(String(1000))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class PrintTask(Base, TimestampMixin):
@@ -256,7 +256,7 @@ class PrintTask(Base, TimestampMixin):
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     failure_reason: Mapped[str | None] = mapped_column(String(1000))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class ProductionScheduleOrder(Base, TimestampMixin):
@@ -271,11 +271,12 @@ class ProductionScheduleOrder(Base, TimestampMixin):
     due_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     priority: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class ProductionScheduleItem(Base, TimestampMixin):
     __tablename__ = "production_schedule_items"
+    __table_args__ = {"implicit_returning": False}
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     schedule_order_id: Mapped[int] = mapped_column(ForeignKey("production_schedule_orders.id"), index=True)
@@ -285,7 +286,7 @@ class ProductionScheduleItem(Base, TimestampMixin):
     scheduled_end_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False))
     status: Mapped[str] = mapped_column(String(50), default="scheduled", index=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class PrinterStatusLog(Base):
@@ -318,7 +319,7 @@ class Material(Base, TimestampMixin):
     safe_stock_weight: Mapped[float] = mapped_column(Numeric(18, 3), default=0)
     unit_cost: Mapped[float | None] = mapped_column(Numeric(18, 2))
     status: Mapped[str] = mapped_column(String(50), default="active", index=True)
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class FinishedGoodsInventory(Base):
@@ -352,7 +353,7 @@ class InventoryLock(Base):
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
     released_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
-    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
 class MaterialStockLog(Base):

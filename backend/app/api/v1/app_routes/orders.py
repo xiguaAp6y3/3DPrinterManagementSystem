@@ -3,15 +3,20 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
 
 from app.core.security import require_app_user
+from app.db.models.core import Order, OrderItem, PrintTask, Product, ProductSku, ProductionScheduleOrder
+from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
+from app.services.db_helpers import next_no, paginate, require_entity, to_float
 
 router = APIRouter()
 
 OrderType = Literal["listed_product", "custom"]
 OrderStatus = Literal["submitted", "reviewing", "quoted", "quote_confirmed", "payment_confirmed", "scheduled", "printing", "post_processing", "quality_check", "completed", "cancelled"]
-PaymentStatus = Literal["unconfirmed", "confirmed", "refunded"]
+PaymentStatus = Literal["unconfirmed", "confirmed", "cancelled"]
 
 
 class ListedProductOrderItem(BaseModel):
@@ -45,15 +50,109 @@ class OrderDetail(OrderSummary):
 
 
 @router.get("", response_model=ApiResponse[PageResponse[OrderSummary]])
-def list_orders(page: int = 1, page_size: int = 20, order_type: OrderType | None = None, status: OrderStatus | None = None, payment_status: PaymentStatus | None = None, keyword: str | None = None, created_from: datetime | None = None, created_to: datetime | None = None, _: dict = Depends(require_app_user)):
-    return paginated_response([], page, page_size, 0)
+def list_orders(page: int = 1, page_size: int = 20, order_type: OrderType | None = None, status: OrderStatus | None = None, payment_status: PaymentStatus | None = None, keyword: str | None = None, created_from: datetime | None = None, created_to: datetime | None = None, current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
+    stmt = select(Order).where(Order.user_id == current_user["user"].id).order_by(Order.created_at.desc())
+    if order_type:
+        stmt = stmt.where(Order.order_type == order_type)
+    if status:
+        stmt = stmt.where(Order.status == status)
+    if payment_status:
+        stmt = stmt.where(Order.payment_status == payment_status)
+    if keyword:
+        stmt = stmt.where(or_(Order.order_no.contains(keyword), Order.customer_note.contains(keyword)))
+    if created_from:
+        stmt = stmt.where(Order.created_at >= created_from)
+    if created_to:
+        stmt = stmt.where(Order.created_at <= created_to)
+    items, page, page_size, total = paginate(db, stmt, page, page_size)
+    return paginated_response([serialize_order_summary(db, item) for item in items], page, page_size, total)
 
 
 @router.get("/{order_no}", response_model=ApiResponse[OrderDetail])
-def get_order(order_no: str, _: dict = Depends(require_app_user)):
-    return success_response({"id": None, "order_no": order_no, "order_type": "listed_product", "status": "submitted", "total_amount": 0, "payment_status": "unconfirmed", "item_count": 0, "items": [], "schedules": [], "print_tasks": []})
+def get_order(order_no: str, current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
+    order = require_entity(db.scalar(select(Order).where(Order.order_no == order_no, Order.user_id == current_user["user"].id)), "订单不存在")
+    return success_response(serialize_order_detail(db, order))
 
 
 @router.post("/listed-product", response_model=ApiResponse[OrderSummary])
-def create_listed_product_order(payload: CreateListedProductOrderRequest, idempotency_key: str = Header(alias="Idempotency-Key"), _: dict = Depends(require_app_user)):
-    return success_response({"id": None, "order_no": "OD-PENDING", "order_type": "listed_product", "status": "submitted", "payment_status": "unconfirmed", "item_count": len(payload.items), "total_amount": 0})
+def create_listed_product_order(payload: CreateListedProductOrderRequest, idempotency_key: str = Header(alias="Idempotency-Key"), current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
+    order = Order(
+        order_no=next_no(db, "seq_order_no", "OD"),
+        user_id=current_user["user"].id,
+        order_type="listed_product",
+        status="submitted",
+        payment_status="unconfirmed",
+        total_amount=0,
+        customer_note=payload.customer_note,
+    )
+    db.add(order)
+    db.flush()
+
+    total_amount = 0.0
+    for item in payload.items:
+        sku = require_entity(db.get(ProductSku, item.sku_id), "商品 SKU 不存在")
+        product = require_entity(db.get(Product, sku.product_id), "商品不存在")
+        if product.is_deleted or product.sales_status != "on_sale" or sku.status != "active":
+            require_entity(None, "商品不可下单")
+        unit_price = to_float(sku.price) or 0
+        subtotal = unit_price * item.quantity
+        total_amount += subtotal
+        db.add(
+            OrderItem(
+                order_id=order.id,
+                product_id=product.id,
+                sku_id=sku.id,
+                item_name=product.name,
+                unit_price=unit_price,
+                quantity=item.quantity,
+                subtotal=subtotal,
+            )
+        )
+
+    order.total_amount = total_amount
+    db.commit()
+    db.refresh(order)
+    return success_response(serialize_order_summary(db, order))
+
+
+def serialize_order_summary(db: Session, order: Order) -> dict:
+    item_count = db.scalar(select(func.count()).select_from(OrderItem).where(OrderItem.order_id == order.id)) or 0
+    return {
+        "id": order.id,
+        "order_no": order.order_no,
+        "order_type": order.order_type,
+        "status": order.status,
+        "total_amount": to_float(order.total_amount) or 0,
+        "payment_status": order.payment_status,
+        "item_count": item_count,
+        "created_at": order.created_at,
+    }
+
+
+def serialize_order_detail(db: Session, order: Order) -> dict:
+    data = serialize_order_summary(db, order)
+    items = db.scalars(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)).all()
+    schedules = db.scalars(select(ProductionScheduleOrder).where(ProductionScheduleOrder.order_id == order.id).order_by(ProductionScheduleOrder.id)).all()
+    print_tasks = db.scalars(select(PrintTask).where(PrintTask.order_id == order.id).order_by(PrintTask.id)).all()
+    data.update(
+        {
+            "customer_note": order.customer_note,
+            "admin_note": order.admin_note,
+            "items": [
+                {
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "sku_id": item.sku_id,
+                    "custom_request_id": item.custom_request_id,
+                    "item_name": item.item_name,
+                    "unit_price": to_float(item.unit_price) or 0,
+                    "quantity": item.quantity,
+                    "subtotal": to_float(item.subtotal) or 0,
+                }
+                for item in items
+            ],
+            "schedules": [{"id": item.id, "schedule_no": item.schedule_no, "status": item.status} for item in schedules],
+            "print_tasks": [{"id": item.id, "task_no": item.task_no, "status": item.status} for item in print_tasks],
+        }
+    )
+    return data

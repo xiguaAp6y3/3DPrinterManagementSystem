@@ -25,9 +25,12 @@ from app.api.v1.app_routes import (
     products as app_products,
     quotes,
 )
+from app.api.v1.public_routes import product_images as public_product_images
 
 
 api_v1_router = APIRouter()
+
+api_v1_router.include_router(public_product_images.router, prefix="/public/product-images", tags=["public-product-images"])
 
 api_v1_router.include_router(app_auth.router, prefix="/app/auth", tags=["app-auth"])
 api_v1_router.include_router(app_product_categories.router, prefix="/app/product-categories", tags=["app-product-categories"])
