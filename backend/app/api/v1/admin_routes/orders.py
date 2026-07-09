@@ -11,6 +11,7 @@ from app.db.models.core import Order, OrderItem, PrintTask, ProductionScheduleOr
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import paginate, require_entity, to_float
+from app.services.order_status import sync_order_shipping_status
 
 router = APIRouter()
 
@@ -67,6 +68,12 @@ def list_orders(page: int = 1, page_size: int = 20, order_type: OrderType | None
 @router.get("/{order_id}", response_model=ApiResponse[OrderDetail])
 def get_order(order_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     order = require_entity(db.get(Order, order_id), "订单不存在")
+    if order.status in {"shipping", "partially_shipped"}:
+        previous_status = order.status
+        sync_order_shipping_status(db, order.id)
+        if order.status != previous_status:
+            db.commit()
+            db.refresh(order)
     return success_response(serialize_order_detail(db, order))
 
 

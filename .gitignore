@@ -77,3 +77,4 @@ desktop.ini
 # Keep source design docs, SQL scripts, and Caddy config tracked.
 /deploy/caddy/caddy.exe
 /deploy/caddy/Caddyfile
+

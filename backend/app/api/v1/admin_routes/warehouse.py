@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -26,6 +26,7 @@ from app.db.models.core import (
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import next_no, paginate, require_entity
+from app.services.order_status import sync_order_shipping_status
 
 router = APIRouter()
 
@@ -360,6 +361,7 @@ def confirm_outbound(outbound_id: int, idempotency_key: str = Header(alias="Idem
     outbound.status = "confirmed"
     outbound.operator_id = current_admin["staff_user"].id
     outbound.confirmed_at = now
+    db.flush()
     for order_id in affected_order_ids:
         sync_order_shipping_status(db, order_id)
     db.commit()
@@ -450,18 +452,6 @@ def sync_order_inbound_status(db: Session, order: Order) -> None:
         order.status = "completed"
     elif completed_count > 0:
         order.status = "partially_completed"
-
-
-def sync_order_shipping_status(db: Session, order_id: int) -> None:
-    order = db.get(Order, order_id)
-    if order is None:
-        return
-    total_items = db.scalar(select(func.count()).select_from(WarehouseStockItem).where(WarehouseStockItem.order_id == order_id)) or 0
-    shipped_items = db.scalar(select(func.count()).select_from(WarehouseStockItem).where(WarehouseStockItem.order_id == order_id, WarehouseStockItem.status == "shipped")) or 0
-    if total_items and shipped_items >= total_items:
-        order.status = "shipped"
-    elif shipped_items > 0:
-        order.status = "partially_shipped"
 
 
 def serialize_warehouse(item: Warehouse) -> dict[str, Any]:
