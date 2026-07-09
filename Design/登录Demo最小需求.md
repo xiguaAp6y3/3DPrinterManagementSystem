@@ -237,12 +237,7 @@ APP token payload：
 auth_refresh_tokens
 ```
 
-新库直接执行 `001_create_tables.sql` 即可；已有库需要执行：
-
-```text
-deploy/sql/004_auth_refresh_tokens.sql
-deploy/sql/005_update_demo_admin_password.sql
-```
+当前项目不再维护旧库增量补丁。清空数据库后直接按 `001_create_tables.sql -> 002_create_triggers.sql -> 003_seed_dev.sql` 重建即可。
 
 当前落地字段：
 

@@ -101,7 +101,7 @@ deploy/sql/002_create_triggers.sql
 deploy/sql/003_seed_dev.sql
 ```
 
-`004_auth_refresh_tokens.sql` 和 `005_update_demo_admin_password.sql` 是旧库增量补丁；新库重建时不需要执行。
+旧库增量补丁已经移除；当前只维护从空数据库重建的 `001 -> 002 -> 003` 脚本链路。
 
 `003_seed_dev.sql` 会创建：
 
@@ -464,4 +464,3 @@ operations: 121
 - 打印机未接 OctoPrint / Klipper，状态由管理员人工维护。
 - 出库撤销、退货入库、盘点、库存件调整属于仓库二期。
 - Dashboard 已有基础统计，但待补仓库待办、待入库、待出库等统计。
-

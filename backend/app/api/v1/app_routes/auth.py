@@ -23,14 +23,14 @@ class AppRegisterRequest(BaseModel):
 
 
 class AppDemoLoginRequest(BaseModel):
-    phone: str | None = None
+    phone: str
     code: str
 
 
 class AppUserInfo(BaseModel):
     id: int | None = None
     email: str | None = None
-    phone: str
+    phone: str | None = None
     nickname: str | None = None
     avatar_url: str | None = None
     status: str | None = None

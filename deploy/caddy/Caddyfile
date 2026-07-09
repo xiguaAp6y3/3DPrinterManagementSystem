@@ -29,4 +29,7 @@ api.example.com {
 
     @health path /health
     reverse_proxy @health 127.0.0.1:5000
+
+    @docs path /docs /redoc /openapi.json
+    reverse_proxy @docs 127.0.0.1:5000
 }
