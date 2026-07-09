@@ -6,10 +6,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.errors import AppError
 from app.core.security import require_app_user
 from app.db.models.core import Order, OrderItem, PrintTask, Product, ProductSku, ProductionScheduleOrder, Shipment, ShipmentPackage
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
+from app.services import coupon_service
 from app.services.db_helpers import next_no, paginate, require_entity, to_float
 
 router = APIRouter()
@@ -28,6 +30,7 @@ class ListedProductOrderItem(BaseModel):
 class CreateListedProductOrderRequest(BaseModel):
     items: list[ListedProductOrderItem] = Field(min_length=1)
     customer_note: str | None = None
+    coupon_id: int | None = Field(None, description="可选优惠券ID，下单时自动抵扣，实付最低0元")
 
 
 class OrderSummary(BaseModel):
@@ -38,6 +41,8 @@ class OrderSummary(BaseModel):
     total_amount: float = 0
     payment_status: PaymentStatus | str
     item_count: int = 0
+    user_coupon_id: int | None = None
+    coupon_discount_amount: float = 0
     created_at: datetime | None = None
 
 
@@ -118,6 +123,20 @@ def create_listed_product_order(payload: CreateListedProductOrderRequest, idempo
         )
 
     order.total_amount = total_amount
+
+    # 优惠券抵扣：校验+计算折扣+锁定券，实付最低 0 元
+    if payload.coupon_id:
+        result = coupon_service.validate_and_apply_coupon(
+            db=db,
+            coupon_id=payload.coupon_id,
+            user_id=current_user["user"].id,
+            order_total=total_amount,
+            order_id=order.id,
+        )
+        order.user_coupon_id = payload.coupon_id
+        order.coupon_discount_amount = result["discount_amount"]
+        order.total_amount = result["final_amount"]
+
     db.commit()
     db.refresh(order)
     return success_response(serialize_order_summary(db, order))
@@ -133,6 +152,8 @@ def serialize_order_summary(db: Session, order: Order) -> dict:
         "total_amount": to_float(order.total_amount) or 0,
         "payment_status": order.payment_status,
         "item_count": item_count,
+        "user_coupon_id": order.user_coupon_id,
+        "coupon_discount_amount": to_float(order.coupon_discount_amount) or 0,
         "created_at": order.created_at,
     }
 

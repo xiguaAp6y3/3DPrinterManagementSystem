@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.admin_routes import (
     auth as admin_auth,
+    coupons as admin_coupons,
     custom_requests as admin_custom_requests,
     dashboard,
     files as admin_files,
@@ -60,5 +61,6 @@ api_v1_router.include_router(printers.router, prefix="/admin/printers", tags=["a
 api_v1_router.include_router(product_images.router, prefix="/admin/product-images", tags=["admin-product-images"])
 api_v1_router.include_router(schedules.router, prefix="/admin/production-schedule-orders", tags=["admin-schedules"])
 api_v1_router.include_router(production_schedule_items.router, prefix="/admin/production-schedule-items", tags=["admin-schedule-items"])
+api_v1_router.include_router(admin_coupons.router, prefix="/admin/coupons", tags=["admin-coupons"])
 api_v1_router.include_router(inventory.router, prefix="/admin/inventory", tags=["admin-inventory"])
 api_v1_router.include_router(warehouse.router, prefix="/admin", tags=["admin-warehouse"])

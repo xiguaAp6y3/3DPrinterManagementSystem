@@ -111,6 +111,8 @@ def serialize_order_detail(db: Session, order: Order, shallow: bool = False) -> 
         "status": order.status,
         "total_amount": to_float(order.total_amount) or 0,
         "payment_status": order.payment_status,
+        "user_coupon_id": order.user_coupon_id,
+        "coupon_discount_amount": to_float(order.coupon_discount_amount) or 0,
         "customer_note": order.customer_note,
         "admin_note": order.admin_note,
         "items": [],

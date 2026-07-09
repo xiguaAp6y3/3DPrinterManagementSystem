@@ -14,6 +14,7 @@ CREATE SEQUENCE dbo.seq_shipment_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_outbound_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_coupon_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_lottery_record_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_grant_batch_no AS BIGINT START WITH 1 INCREMENT BY 1;
 GO
 
 CREATE TABLE dbo.users (
@@ -248,12 +249,15 @@ CREATE TABLE dbo.orders (
     receiver_name NVARCHAR(100) NULL,
     receiver_phone NVARCHAR(50) NULL,
     receiver_address NVARCHAR(1000) NULL,
+    user_coupon_id BIGINT NULL,
+    coupon_discount_amount DECIMAL(18,2) NOT NULL CONSTRAINT DF_orders_coupon_discount DEFAULT 0,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_orders_created_at DEFAULT SYSUTCDATETIME(),
     updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_orders_updated_at DEFAULT SYSUTCDATETIME(),
     row_version ROWVERSION NOT NULL,
     CONSTRAINT UQ_orders_order_no UNIQUE (order_no),
     CONSTRAINT FK_orders_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
     CONSTRAINT FK_orders_payment_confirmed_by FOREIGN KEY (payment_confirmed_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT FK_orders_user_coupon FOREIGN KEY (user_coupon_id) REFERENCES dbo.user_coupons(id),
     CONSTRAINT CK_orders_type CHECK (order_type IN (N'listed_product', N'custom')),
     CONSTRAINT CK_orders_status CHECK (status IN (N'submitted', N'reviewing', N'quoted', N'quote_confirmed', N'payment_confirmed', N'scheduled', N'printing', N'post_processing', N'quality_check', N'partially_completed', N'completed', N'partially_inbound', N'in_warehouse', N'ready_to_ship', N'shipping', N'partially_shipped', N'shipped', N'cancelled')),
     CONSTRAINT CK_orders_payment_status CHECK (payment_status IN (N'unconfirmed', N'confirmed', N'cancelled'))
@@ -651,12 +655,49 @@ CREATE TABLE dbo.operation_logs (
 );
 GO
 
+-- Coupon templates (admin-defined, no discount upper-bound at DB level; user-issued limits enforced by service layer).
+CREATE TABLE dbo.coupon_templates (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    coupon_no NVARCHAR(50) NOT NULL,
+    name NVARCHAR(100) NOT NULL,
+    discount_type NVARCHAR(50) NOT NULL,
+    discount_value DECIMAL(18,2) NOT NULL,
+    min_spend DECIMAL(18,2) NOT NULL CONSTRAINT DF_coupon_templates_min_spend DEFAULT 0,
+    max_discount DECIMAL(18,2) NULL,
+    scope_type NVARCHAR(50) NOT NULL CONSTRAINT DF_coupon_templates_scope_type DEFAULT N'all',
+    scope_category_id BIGINT NULL,
+    scope_product_id BIGINT NULL,
+    validity_type NVARCHAR(50) NOT NULL,
+    valid_days INT NULL,
+    fixed_start_at DATETIME2(3) NULL,
+    fixed_end_at DATETIME2(3) NULL,
+    total_quota BIGINT NULL,
+    issued_count BIGINT NOT NULL CONSTRAINT DF_coupon_templates_issued_count DEFAULT 0,
+    per_user_limit INT NULL,
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_coupon_templates_status DEFAULT N'active',
+    remark NVARCHAR(1000) NULL,
+    created_by BIGINT NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_coupon_templates_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_coupon_templates_updated_at DEFAULT SYSUTCDATETIME(),
+    row_version ROWVERSION NOT NULL,
+    CONSTRAINT UQ_coupon_templates_no UNIQUE (coupon_no),
+    CONSTRAINT FK_coupon_templates_category FOREIGN KEY (scope_category_id) REFERENCES dbo.product_categories(id),
+    CONSTRAINT FK_coupon_templates_product FOREIGN KEY (scope_product_id) REFERENCES dbo.products(id),
+    CONSTRAINT FK_coupon_templates_created_by FOREIGN KEY (created_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_coupon_templates_discount_type CHECK (discount_type IN (N'fixed', N'percentage', N'fixed_no_threshold')),
+    CONSTRAINT CK_coupon_templates_scope_type CHECK (scope_type IN (N'all', N'listed_product', N'custom', N'category', N'product')),
+    CONSTRAINT CK_coupon_templates_validity_type CHECK (validity_type IN (N'fixed', N'relative')),
+    CONSTRAINT CK_coupon_templates_status CHECK (status IN (N'active', N'disabled', N'archived')),
+    CONSTRAINT CK_coupon_templates_discount_value CHECK (discount_value >= 0),
+    CONSTRAINT CK_coupon_templates_max_discount CHECK (max_discount IS NULL OR max_discount >= 0)
+);
+GO
+
 -- User coupons (issued instances).
--- For the demo, coupons are percentage-discount only (e.g. 85 = 8.5折).
--- discount_value must be >= 80 (最多八折) and < 100.
 CREATE TABLE dbo.user_coupons (
     id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
     user_id BIGINT NOT NULL,
+    template_id BIGINT NULL,
     coupon_no NVARCHAR(50) NOT NULL,
     name NVARCHAR(100) NOT NULL,
     discount_type NVARCHAR(50) NOT NULL CONSTRAINT DF_user_coupons_discount_type DEFAULT N'percentage',
@@ -673,13 +714,16 @@ CREATE TABLE dbo.user_coupons (
     revoked_at DATETIME2(3) NULL,
     revoked_by BIGINT NULL,
     revoke_reason NVARCHAR(500) NULL,
+    created_by BIGINT NULL,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_user_coupons_created_at DEFAULT SYSUTCDATETIME(),
     updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_user_coupons_updated_at DEFAULT SYSUTCDATETIME(),
     row_version ROWVERSION NOT NULL,
     CONSTRAINT UQ_user_coupons_no UNIQUE (coupon_no),
     CONSTRAINT FK_user_coupons_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
+    CONSTRAINT FK_user_coupons_template FOREIGN KEY (template_id) REFERENCES dbo.coupon_templates(id),
     CONSTRAINT FK_user_coupons_order FOREIGN KEY (used_order_id) REFERENCES dbo.orders(id),
     CONSTRAINT FK_user_coupons_revoked_by FOREIGN KEY (revoked_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT FK_user_coupons_created_by FOREIGN KEY (created_by) REFERENCES dbo.staff_users(id),
     CONSTRAINT CK_user_coupons_discount_type CHECK (discount_type IN (N'percentage', N'fixed', N'fixed_no_threshold')),
     CONSTRAINT CK_user_coupons_source CHECK (source IN (N'admin_grant', N'lottery', N'signup_gift', N'promotion')),
     CONSTRAINT CK_user_coupons_status CHECK (status IN (N'unused', N'used', N'expired', N'revoked')),
@@ -709,6 +753,25 @@ CREATE TABLE dbo.lottery_records (
         (is_win = 1 AND discount_value IS NOT NULL)
         OR (is_win = 0 AND discount_value IS NULL)
     )
+);
+GO
+
+-- Coupon grant batches (admin batch issue tracking).
+CREATE TABLE dbo.coupon_grant_batches (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    batch_no NVARCHAR(50) NOT NULL,
+    template_id BIGINT NOT NULL,
+    granted_by BIGINT NOT NULL,
+    target_type NVARCHAR(50) NOT NULL,
+    target_count INT NOT NULL,
+    success_count INT NOT NULL CONSTRAINT DF_coupon_grant_batches_success DEFAULT 0,
+    remark NVARCHAR(1000) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_coupon_grant_batches_created_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_coupon_grant_batches_no UNIQUE (batch_no),
+    CONSTRAINT FK_coupon_grant_batches_template FOREIGN KEY (template_id) REFERENCES dbo.coupon_templates(id),
+    CONSTRAINT FK_coupon_grant_batches_granted_by FOREIGN KEY (granted_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_coupon_grant_batches_target_type CHECK (target_type IN (N'all_users', N'specified_users', N'single_user')),
+    CONSTRAINT CK_coupon_grant_batches_count CHECK (target_count > 0 AND success_count >= 0 AND success_count <= target_count)
 );
 GO
 
@@ -745,6 +808,9 @@ CREATE INDEX IX_shipment_items_stock_item ON dbo.shipment_items(stock_item_id);
 CREATE INDEX IX_warehouse_outbound_records_status_created ON dbo.warehouse_outbound_records(status, created_at DESC);
 CREATE INDEX IX_warehouse_outbound_items_stock_item ON dbo.warehouse_outbound_items(stock_item_id);
 CREATE INDEX IX_user_coupons_user_status ON dbo.user_coupons(user_id, status, valid_until DESC);
+CREATE INDEX IX_user_coupons_template ON dbo.user_coupons(template_id);
+CREATE INDEX IX_orders_user_coupon ON dbo.orders(user_coupon_id);
+CREATE INDEX IX_coupon_grant_batches_template ON dbo.coupon_grant_batches(template_id, created_at DESC);
 CREATE INDEX IX_lottery_records_user_created ON dbo.lottery_records(user_id, created_at DESC);
 CREATE UNIQUE INDEX UX_lottery_records_user_idem ON dbo.lottery_records(user_id, idempotency_key);
 GO

@@ -214,6 +214,8 @@ class Order(Base, TimestampMixin):
     receiver_name: Mapped[str | None] = mapped_column(String(100))
     receiver_phone: Mapped[str | None] = mapped_column(String(50))
     receiver_address: Mapped[str | None] = mapped_column(String(1000))
+    user_coupon_id: Mapped[int | None] = mapped_column(ForeignKey("user_coupons.id"), index=True)
+    coupon_discount_amount: Mapped[float] = mapped_column(Numeric(18, 2), default=0)
     row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
 
@@ -543,11 +545,38 @@ class OperationLog(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
 
 
+class CouponTemplate(Base, TimestampMixin):
+    __tablename__ = "coupon_templates"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    coupon_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    discount_type: Mapped[str] = mapped_column(String(50))
+    discount_value: Mapped[float] = mapped_column(Numeric(18, 2))
+    min_spend: Mapped[float] = mapped_column(Numeric(18, 2), default=0)
+    max_discount: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    scope_type: Mapped[str] = mapped_column(String(50), default="all")
+    scope_category_id: Mapped[int | None] = mapped_column(ForeignKey("product_categories.id"))
+    scope_product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
+    validity_type: Mapped[str] = mapped_column(String(50))
+    valid_days: Mapped[int | None] = mapped_column(Integer)
+    fixed_start_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    fixed_end_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    total_quota: Mapped[int | None] = mapped_column(BigInteger)
+    issued_count: Mapped[int] = mapped_column(BigInteger, default=0)
+    per_user_limit: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    remark: Mapped[str | None] = mapped_column(String(1000))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+
 class UserCoupon(Base, TimestampMixin):
     __tablename__ = "user_coupons"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("coupon_templates.id"), index=True)
     coupon_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     discount_type: Mapped[str] = mapped_column(String(50), default="percentage")
@@ -564,7 +593,22 @@ class UserCoupon(Base, TimestampMixin):
     revoked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     revoked_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     revoke_reason: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+
+class CouponGrantBatch(Base):
+    __tablename__ = "coupon_grant_batches"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("coupon_templates.id"), index=True)
+    granted_by: Mapped[int] = mapped_column(ForeignKey("staff_users.id"))
+    target_type: Mapped[str] = mapped_column(String(50))
+    target_count: Mapped[int] = mapped_column(Integer)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    remark: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
 
 
 class LotteryRecord(Base):
