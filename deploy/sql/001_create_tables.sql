@@ -27,7 +27,6 @@ CREATE TABLE dbo.users (
     deleted_at DATETIME2(3) NULL,
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_users_created_at DEFAULT SYSUTCDATETIME(),
     updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_users_updated_at DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT UQ_users_email UNIQUE (email),
     CONSTRAINT CK_users_status CHECK (status IN (N'active', N'disabled', N'deleted'))
 );
 
@@ -651,7 +650,8 @@ CREATE TABLE dbo.operation_logs (
 GO
 
 CREATE INDEX IX_products_status ON dbo.products(sales_status, is_deleted, sort_order);
-CREATE UNIQUE INDEX UX_users_phone_not_null ON dbo.users(phone) WHERE phone IS NOT NULL;
+CREATE UNIQUE INDEX UX_users_email_active ON dbo.users(email) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX UX_users_phone_active_not_null ON dbo.users(phone) WHERE phone IS NOT NULL AND deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_staff_users_email_not_null ON dbo.staff_users(email) WHERE email IS NOT NULL;
 CREATE INDEX IX_product_skus_product_status ON dbo.product_skus(product_id, status);
 CREATE INDEX IX_product_images_product_type ON dbo.product_images(product_id, image_type, sort_order);

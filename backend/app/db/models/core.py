@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, DateTime, FetchedValue, ForeignKey, Integer, LargeBinary, Numeric, Unicode as String, UnicodeText as Text
+from sqlalchemy import BigInteger, Boolean, DateTime, FetchedValue, ForeignKey, Index, Integer, LargeBinary, Numeric, Unicode as String, UnicodeText as Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -18,7 +18,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(30), index=True)
     nickname: Mapped[str | None] = mapped_column(String(100))
@@ -27,6 +27,10 @@ class User(Base, TimestampMixin):
     email_verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    __table_args__ = (
+        Index("UX_users_email_active", "email", unique=True, mssql_where=deleted_at.is_(None)),
+        Index("UX_users_phone_active_not_null", "phone", unique=True, mssql_where=phone.is_not(None) & deleted_at.is_(None)),
+    )
 
 
 class StaffUser(Base, TimestampMixin):

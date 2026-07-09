@@ -140,13 +140,13 @@ def normalize_email(email: str) -> str:
 
 def ensure_user_unique(db: Session, email: str | None, phone: str | None, exclude_user_id: int | None = None) -> None:
     if email:
-        stmt = select(User).where(User.email == email)
+        stmt = select(User).where(User.email == email, User.deleted_at.is_(None))
         if exclude_user_id:
             stmt = stmt.where(User.id != exclude_user_id)
         if db.scalar(stmt):
             raise AppError("USER_EMAIL_EXISTS", "邮箱已存在", 409)
     if phone:
-        stmt = select(User).where(User.phone == phone)
+        stmt = select(User).where(User.phone == phone, User.deleted_at.is_(None))
         if exclude_user_id:
             stmt = stmt.where(User.id != exclude_user_id)
         if db.scalar(stmt):

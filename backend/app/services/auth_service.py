@@ -75,11 +75,11 @@ def app_register(db: Session, email: str, password: str, nickname: str | None = 
     normalized_email = email.strip().lower()
     if "@" not in normalized_email or "." not in normalized_email.rsplit("@", 1)[-1]:
         raise AppError("VALIDATION_ERROR", "邮箱格式不正确", status.HTTP_422_UNPROCESSABLE_ENTITY)
-    existing = db.scalar(select(User).where(User.email == normalized_email))
+    existing = db.scalar(select(User).where(User.email == normalized_email, User.deleted_at.is_(None)))
     if existing is not None:
         raise AppError("AUTH_EMAIL_EXISTS", "邮箱已注册", status.HTTP_409_CONFLICT)
     if phone:
-        existing_phone = db.scalar(select(User).where(User.phone == phone))
+        existing_phone = db.scalar(select(User).where(User.phone == phone, User.deleted_at.is_(None)))
         if existing_phone is not None:
             raise AppError("AUTH_PHONE_EXISTS", "手机号已存在", status.HTTP_409_CONFLICT)
 
@@ -105,7 +105,7 @@ def app_register(db: Session, email: str, password: str, nickname: str | None = 
 
 def app_login(db: Session, email: str, password: str) -> dict:
     normalized_email = email.strip().lower()
-    user = db.scalar(select(User).where(User.email == normalized_email))
+    user = db.scalar(select(User).where(User.email == normalized_email, User.deleted_at.is_(None)))
     if user is None or not user.password_hash or not verify_password(password, user.password_hash):
         raise AppError("AUTH_INVALID_CREDENTIALS", "邮箱或密码错误", status.HTTP_401_UNAUTHORIZED)
     if user.status != "active":
@@ -127,7 +127,7 @@ def app_demo_login(db: Session, phone: str, code: str) -> dict:
     if code != DEMO_APP_LOGIN_CODE:
         raise AppError("AUTH_INVALID_CODE", "验证码错误，Demo 固定验证码为 123456", status.HTTP_401_UNAUTHORIZED)
 
-    user = db.scalar(select(User).where(User.phone == phone))
+    user = db.scalar(select(User).where(User.phone == phone, User.deleted_at.is_(None)))
     if user is None:
         user = User(
             email=f"demo-{phone}@local.3dpms",
