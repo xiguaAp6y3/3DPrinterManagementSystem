@@ -541,3 +541,42 @@ class OperationLog(Base):
     after_data: Mapped[str | None] = mapped_column(Text)
     remark: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+
+
+class UserCoupon(Base, TimestampMixin):
+    __tablename__ = "user_coupons"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    coupon_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    discount_type: Mapped[str] = mapped_column(String(50), default="percentage")
+    discount_value: Mapped[float] = mapped_column(Numeric(18, 2))
+    min_spend: Mapped[float] = mapped_column(Numeric(18, 2), default=0)
+    scope_type: Mapped[str] = mapped_column(String(50), default="all")
+    source: Mapped[str] = mapped_column(String(50), default="lottery")
+    status: Mapped[str] = mapped_column(String(50), default="unused", index=True)
+    valid_from: Mapped[DateTime] = mapped_column(DateTime(timezone=False))
+    valid_until: Mapped[DateTime] = mapped_column(DateTime(timezone=False))
+    used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    used_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
+    discount_amount: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    revoked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
+    revoked_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
+    revoke_reason: Mapped[str | None] = mapped_column(String(500))
+    row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+
+class LotteryRecord(Base):
+    __tablename__ = "lottery_records"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    record_no: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    is_win: Mapped[bool] = mapped_column(Boolean, default=True)
+    prize_name: Mapped[str] = mapped_column(String(100))
+    discount_value: Mapped[float | None] = mapped_column(Numeric(18, 2))
+    won_coupon_id: Mapped[int | None] = mapped_column(ForeignKey("user_coupons.id"))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    client_ip: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())

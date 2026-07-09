@@ -21,6 +21,7 @@ from app.api.v1.admin_routes import (
 )
 from app.api.v1.app_routes import (
     auth as app_auth,
+    coupons as app_coupons,
     custom_requests,
     files,
     orders as app_orders,
@@ -42,6 +43,7 @@ api_v1_router.include_router(app_orders.router, prefix="/app/orders", tags=["app
 api_v1_router.include_router(files.router, prefix="/app/files", tags=["app-files"])
 api_v1_router.include_router(custom_requests.router, prefix="/app/custom-requests", tags=["app-custom-requests"])
 api_v1_router.include_router(quotes.router, prefix="/app/quotes", tags=["app-quotes"])
+api_v1_router.include_router(app_coupons.router, prefix="/app/coupons", tags=["app-coupons"])
 
 api_v1_router.include_router(admin_auth.router, prefix="/admin/auth", tags=["admin-auth"])
 api_v1_router.include_router(users.router, prefix="/admin/users", tags=["admin-users"])

@@ -12,6 +12,8 @@ CREATE SEQUENCE dbo.seq_stock_item_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_inbound_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_shipment_no AS BIGINT START WITH 1 INCREMENT BY 1;
 CREATE SEQUENCE dbo.seq_outbound_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_coupon_no AS BIGINT START WITH 1 INCREMENT BY 1;
+CREATE SEQUENCE dbo.seq_lottery_record_no AS BIGINT START WITH 1 INCREMENT BY 1;
 GO
 
 CREATE TABLE dbo.users (
@@ -649,6 +651,67 @@ CREATE TABLE dbo.operation_logs (
 );
 GO
 
+-- User coupons (issued instances).
+-- For the demo, coupons are percentage-discount only (e.g. 85 = 8.5折).
+-- discount_value must be >= 80 (最多八折) and < 100.
+CREATE TABLE dbo.user_coupons (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    coupon_no NVARCHAR(50) NOT NULL,
+    name NVARCHAR(100) NOT NULL,
+    discount_type NVARCHAR(50) NOT NULL CONSTRAINT DF_user_coupons_discount_type DEFAULT N'percentage',
+    discount_value DECIMAL(18,2) NOT NULL,
+    min_spend DECIMAL(18,2) NOT NULL CONSTRAINT DF_user_coupons_min_spend DEFAULT 0,
+    scope_type NVARCHAR(50) NOT NULL CONSTRAINT DF_user_coupons_scope_type DEFAULT N'all',
+    source NVARCHAR(50) NOT NULL CONSTRAINT DF_user_coupons_source DEFAULT N'lottery',
+    status NVARCHAR(50) NOT NULL CONSTRAINT DF_user_coupons_status DEFAULT N'unused',
+    valid_from DATETIME2(3) NOT NULL,
+    valid_until DATETIME2(3) NOT NULL,
+    used_at DATETIME2(3) NULL,
+    used_order_id BIGINT NULL,
+    discount_amount DECIMAL(18,2) NULL,
+    revoked_at DATETIME2(3) NULL,
+    revoked_by BIGINT NULL,
+    revoke_reason NVARCHAR(500) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_user_coupons_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(3) NOT NULL CONSTRAINT DF_user_coupons_updated_at DEFAULT SYSUTCDATETIME(),
+    row_version ROWVERSION NOT NULL,
+    CONSTRAINT UQ_user_coupons_no UNIQUE (coupon_no),
+    CONSTRAINT FK_user_coupons_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
+    CONSTRAINT FK_user_coupons_order FOREIGN KEY (used_order_id) REFERENCES dbo.orders(id),
+    CONSTRAINT FK_user_coupons_revoked_by FOREIGN KEY (revoked_by) REFERENCES dbo.staff_users(id),
+    CONSTRAINT CK_user_coupons_discount_type CHECK (discount_type IN (N'percentage', N'fixed', N'fixed_no_threshold')),
+    CONSTRAINT CK_user_coupons_source CHECK (source IN (N'admin_grant', N'lottery', N'signup_gift', N'promotion')),
+    CONSTRAINT CK_user_coupons_status CHECK (status IN (N'unused', N'used', N'expired', N'revoked')),
+    CONSTRAINT CK_user_coupons_scope CHECK (scope_type IN (N'all', N'listed_product', N'custom', N'category', N'product')),
+    CONSTRAINT CK_user_coupons_time CHECK (valid_until > valid_from),
+    CONSTRAINT CK_user_coupons_discount_value CHECK (discount_value >= 0),
+    CONSTRAINT CK_user_coupons_discount_amount CHECK (discount_amount IS NULL OR discount_amount >= 0)
+);
+GO
+
+-- Lottery draw records (tracks every draw, supports idempotency & daily limits).
+CREATE TABLE dbo.lottery_records (
+    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    record_no NVARCHAR(50) NOT NULL,
+    user_id BIGINT NOT NULL,
+    is_win BIT NOT NULL CONSTRAINT DF_lottery_records_is_win DEFAULT 1,
+    prize_name NVARCHAR(100) NOT NULL,
+    discount_value DECIMAL(18,2) NULL,
+    won_coupon_id BIGINT NULL,
+    idempotency_key NVARCHAR(100) NOT NULL,
+    client_ip NVARCHAR(50) NULL,
+    created_at DATETIME2(3) NOT NULL CONSTRAINT DF_lottery_records_created_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT UQ_lottery_records_no UNIQUE (record_no),
+    CONSTRAINT FK_lottery_records_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
+    CONSTRAINT FK_lottery_records_coupon FOREIGN KEY (won_coupon_id) REFERENCES dbo.user_coupons(id),
+    CONSTRAINT CK_lottery_records_win CHECK (
+        (is_win = 1 AND discount_value IS NOT NULL)
+        OR (is_win = 0 AND discount_value IS NULL)
+    )
+);
+GO
+
 CREATE INDEX IX_products_status ON dbo.products(sales_status, is_deleted, sort_order);
 CREATE UNIQUE INDEX UX_users_email_active ON dbo.users(email) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX UX_users_phone_active_not_null ON dbo.users(phone) WHERE phone IS NOT NULL AND deleted_at IS NULL;
@@ -681,4 +744,7 @@ CREATE INDEX IX_shipment_packages_tracking ON dbo.shipment_packages(tracking_no)
 CREATE INDEX IX_shipment_items_stock_item ON dbo.shipment_items(stock_item_id);
 CREATE INDEX IX_warehouse_outbound_records_status_created ON dbo.warehouse_outbound_records(status, created_at DESC);
 CREATE INDEX IX_warehouse_outbound_items_stock_item ON dbo.warehouse_outbound_items(stock_item_id);
+CREATE INDEX IX_user_coupons_user_status ON dbo.user_coupons(user_id, status, valid_until DESC);
+CREATE INDEX IX_lottery_records_user_created ON dbo.lottery_records(user_id, created_at DESC);
+CREATE UNIQUE INDEX UX_lottery_records_user_idem ON dbo.lottery_records(user_id, idempotency_key);
 GO
