@@ -5,7 +5,15 @@ from sqlalchemy.orm import Session
 from app.core.security import require_app_user
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, success_response
-from app.services.auth_service import app_demo_login, app_login, app_register, logout, refresh_app_token, serialize_user
+from app.services.auth_service import (
+    app_demo_login,
+    app_login,
+    app_register,
+    logout,
+    refresh_app_token,
+    serialize_user,
+    update_app_profile,
+)
 
 router = APIRouter()
 
@@ -57,6 +65,12 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class AppProfileUpdateRequest(BaseModel):
+    nickname: str | None = Field(default=None, max_length=100)
+    old_password: str | None = None
+    new_password: str | None = Field(default=None, min_length=8)
+
+
 @router.post("/login", response_model=ApiResponse[AppLoginResponse])
 def login(payload: AppLoginRequest, db: Session = Depends(get_db)):
     return success_response(app_login(db, payload.email, payload.password))
@@ -75,6 +89,23 @@ def login_demo(payload: AppDemoLoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=ApiResponse[AppUserInfo])
 def me(current_user: dict = Depends(require_app_user)):
     return success_response(serialize_user(current_user["user"]))
+
+
+@router.patch("/profile", response_model=ApiResponse[AppUserInfo])
+def update_profile(
+    payload: AppProfileUpdateRequest,
+    current_user: dict = Depends(require_app_user),
+    db: Session = Depends(get_db),
+):
+    return success_response(
+        update_app_profile(
+            db,
+            current_user["user"],
+            nickname=payload.nickname,
+            old_password=payload.old_password,
+            new_password=payload.new_password,
+        )
+    )
 
 
 @router.post("/refresh", response_model=ApiResponse[TokenRefreshResponse])

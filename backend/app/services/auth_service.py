@@ -152,6 +152,43 @@ def app_demo_login(db: Session, phone: str, code: str) -> dict:
     }
 
 
+def update_app_profile(
+    db: Session,
+    user: User,
+    nickname: str | None = None,
+    old_password: str | None = None,
+    new_password: str | None = None,
+) -> dict:
+    if nickname is None and new_password is None:
+        raise AppError("VALIDATION_ERROR", "至少需要修改昵称或密码", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    if nickname is not None:
+        normalized_nickname = nickname.strip()
+        if not normalized_nickname:
+            raise AppError("VALIDATION_ERROR", "昵称不能为空", status.HTTP_422_UNPROCESSABLE_ENTITY)
+        user.nickname = normalized_nickname
+
+    if new_password is not None:
+        if not old_password:
+            raise AppError("AUTH_OLD_PASSWORD_REQUIRED", "修改密码必须提供原密码", status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not user.password_hash or not verify_password(old_password, user.password_hash):
+            raise AppError("AUTH_INVALID_OLD_PASSWORD", "原密码错误", status.HTTP_401_UNAUTHORIZED)
+
+        user.password_hash = hash_password(new_password)
+        for token in db.scalars(
+            select(AuthRefreshToken).where(
+                AuthRefreshToken.user_id == user.id,
+                AuthRefreshToken.subject_type == "app",
+                AuthRefreshToken.revoked_at.is_(None),
+            )
+        ).all():
+            token.revoked_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(user)
+    return serialize_user(user)
+
+
 def admin_login(db: Session, username: str, password: str) -> dict:
     login_name = username.strip()
     staff_user = db.scalar(select(StaffUser).where((StaffUser.username == login_name) | (StaffUser.email == login_name.lower())))
