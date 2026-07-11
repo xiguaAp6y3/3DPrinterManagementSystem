@@ -113,11 +113,11 @@ def _operation_description(method: str, path: str, tag: str) -> tuple[str, str]:
     else:
         permission = "系统接口，不需要业务身份认证。"
     summary = f"{action}{object_label}"
-    description = (
-        f"{action}{object_label}。{permission}\n\n"
-        f"接口路径：`{path}`\n\n"
-        "成功时返回统一的 `ApiResponse` 结构；参数、响应模型和错误码以当前 OpenAPI schema 为准。"
-    )
+    if tag == "public-product-images":
+        response_description = "成功时直接返回商品图片二进制文件，不使用统一的 JSON `ApiResponse` 包装。"
+    else:
+        response_description = "成功时返回统一的 `ApiResponse` 结构；参数、响应模型和错误码以当前 OpenAPI schema 为准。"
+    description = f"{action}{object_label}。{permission}\n\n接口路径：`{path}`\n\n{response_description}"
     return summary, description
 
 

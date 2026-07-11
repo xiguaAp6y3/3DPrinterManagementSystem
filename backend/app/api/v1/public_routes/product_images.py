@@ -9,7 +9,16 @@ from app.services.db_helpers import require_entity, resolve_storage_path
 router = APIRouter()
 
 
-@router.get("/{image_id}")
+@router.get(
+    "/{image_id}",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "商品图片文件",
+            "content": {"image/*": {}},
+        }
+    },
+)
 def get_public_product_image(image_id: int, db: Session = Depends(get_db)):
     image = require_entity(db.get(ProductImage, image_id), "商品图片不存在")
     product = require_entity(db.get(Product, image.product_id), "商品不存在")
