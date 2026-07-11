@@ -40,11 +40,11 @@ class DownloadUrl(BaseModel):
 
 
 @router.post("/upload", response_model=ApiResponse[FileInfo])
-async def upload_file(file: UploadFile = File(...), current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
+def upload_file(file: UploadFile = File(...), current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise AppError("FILE_TYPE_NOT_ALLOWED", "文件类型不允许", status_code=422, details={"ext": suffix})
-    content = await file.read()
+    content = file.file.read()
     if len(content) > settings.max_upload_size_mb * 1024 * 1024:
         raise AppError("FILE_TOO_LARGE", "文件超过大小限制", status_code=413)
     user_id = current_user["user"].id

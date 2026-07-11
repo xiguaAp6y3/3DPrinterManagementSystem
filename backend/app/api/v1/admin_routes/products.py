@@ -139,14 +139,14 @@ def update_product(product_id: int, payload: ProductUpdate, _: dict = Depends(re
 
 
 @router.post("/{product_id}/images", response_model=ApiResponse[ProductImageItem])
-async def upload_product_image(product_id: int, image_type: ImageType = "detail", sort_order: int = 0, file: UploadFile = File(...), _: dict = Depends(require_admin), db: Session = Depends(get_db)):
+def upload_product_image(product_id: int, image_type: ImageType = "detail", sort_order: int = 0, file: UploadFile = File(...), _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     product = require_entity(db.get(Product, product_id), "商品不存在")
     stored_type = normalize_image_type(image_type)
     directory = settings.upload_root / "product_images" / str(product_id)
     directory.mkdir(parents=True, exist_ok=True)
     filename = f"{datetime.utcnow():%Y%m%d%H%M%S%f}_{safe_storage_name(file.filename or 'image')}"
     storage_path = directory / filename
-    content = await file.read()
+    content = file.file.read()
     storage_path.write_bytes(content)
     storage_key = str(storage_path.as_posix())
     image = ProductImage(product_id=product.id, image_url=storage_key, image_type=stored_type, sort_order=sort_order)

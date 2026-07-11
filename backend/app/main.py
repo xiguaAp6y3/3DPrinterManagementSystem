@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from pydantic import BaseModel
 
 from app.api.v1.router import api_v1_router
@@ -13,15 +14,40 @@ class HealthStatus(BaseModel):
     env: str
 
 
+# Swagger UI / ReDoc CDN (cdn.jsdelivr.net 在国内不稳定，换用 unpkg)
+SWAGGER_JS = "https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"
+SWAGGER_CSS = "https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css"
+REDOC_JS = "https://unpkg.com/redoc@next/bundles/redoc.standalone.js"
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         debug=settings.debug,
         version="0.1.0",
-        docs_url="/docs" if settings.debug else None,
-        redoc_url="/redoc" if settings.debug else None,
+        docs_url=None,
+        redoc_url=None,
         responses=COMMON_ERROR_RESPONSES,
     )
+
+    # 自定义 docs / redoc 端点，使用可访问的 CDN
+    if settings.debug:
+        @app.get("/docs", include_in_schema=False)
+        async def custom_swagger_ui_html():
+            return get_swagger_ui_html(
+                openapi_url=app.openapi_url,
+                title=f"{settings.app_name} - Swagger UI",
+                swagger_js_url=SWAGGER_JS,
+                swagger_css_url=SWAGGER_CSS,
+            )
+
+        @app.get("/redoc", include_in_schema=False)
+        async def custom_redoc_html():
+            return get_redoc_html(
+                openapi_url=app.openapi_url,
+                title=f"{settings.app_name} - ReDoc",
+                redoc_js_url=REDOC_JS,
+            )
 
     app.add_middleware(
         CORSMiddleware,

@@ -257,7 +257,7 @@ CREATE TABLE dbo.orders (
     CONSTRAINT UQ_orders_order_no UNIQUE (order_no),
     CONSTRAINT FK_orders_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
     CONSTRAINT FK_orders_payment_confirmed_by FOREIGN KEY (payment_confirmed_by) REFERENCES dbo.staff_users(id),
-    CONSTRAINT FK_orders_user_coupon FOREIGN KEY (user_coupon_id) REFERENCES dbo.user_coupons(id),
+    -- FK_orders_user_coupon added after user_coupons table is created (circular dependency)
     CONSTRAINT CK_orders_type CHECK (order_type IN (N'listed_product', N'custom')),
     CONSTRAINT CK_orders_status CHECK (status IN (N'submitted', N'reviewing', N'quoted', N'quote_confirmed', N'payment_confirmed', N'scheduled', N'printing', N'post_processing', N'quality_check', N'partially_completed', N'completed', N'partially_inbound', N'in_warehouse', N'ready_to_ship', N'shipping', N'partially_shipped', N'shipped', N'cancelled')),
     CONSTRAINT CK_orders_payment_status CHECK (payment_status IN (N'unconfirmed', N'confirmed', N'cancelled'))
@@ -732,6 +732,11 @@ CREATE TABLE dbo.user_coupons (
     CONSTRAINT CK_user_coupons_discount_value CHECK (discount_value >= 0),
     CONSTRAINT CK_user_coupons_discount_amount CHECK (discount_amount IS NULL OR discount_amount >= 0)
 );
+GO
+
+-- Add circular FK: orders.user_coupon_id -> user_coupons.id
+-- (deferred because user_coupons is created after orders)
+ALTER TABLE dbo.orders ADD CONSTRAINT FK_orders_user_coupon FOREIGN KEY (user_coupon_id) REFERENCES dbo.user_coupons(id);
 GO
 
 -- Lottery draw records (tracks every draw, supports idempotency & daily limits).
