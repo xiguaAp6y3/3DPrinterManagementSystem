@@ -375,6 +375,7 @@ def admin_grant_coupon(
             User.deleted_at.is_(None),
         )
     ).all()
+    users_by_id = {user.id: user for user in users}
     existing_user_ids = {user.id for user in users}
     missing_user_ids = [user_id for user_id in user_ids if user_id not in existing_user_ids]
     if missing_user_ids:
@@ -477,7 +478,7 @@ def admin_grant_coupon(
         "template_id": template.id,
         "target_count": len(user_ids),
         "success_count": success_count,
-        "coupons": [_serialize_coupon(c) for c in coupons],
+        "coupons": [_serialize_coupon(coupon, users_by_id.get(coupon.user_id)) for coupon in coupons],
     }
 
 
@@ -518,7 +519,7 @@ def admin_revoke_coupon(
     coupon.revoke_reason = reason
     db.commit()
     db.refresh(coupon)
-    return _serialize_coupon(coupon)
+    return _serialize_coupon(coupon, db.get(User, coupon.user_id))
 
 
 def admin_list_coupons(
@@ -534,8 +535,11 @@ def admin_list_coupons(
         stmt = stmt.where(UserCoupon.user_id == user_id)
     stmt = _apply_coupon_status_filter(stmt, status_filter)
     items, page, page_size, total = paginate(db, stmt, page, page_size)
+    user_ids = {coupon.user_id for coupon in items}
+    users = db.scalars(select(User).where(User.id.in_(user_ids))).all() if user_ids else []
+    users_by_id = {user.id: user for user in users}
     return {
-        "items": [_serialize_coupon(c) for c in items],
+        "items": [_serialize_coupon(coupon, users_by_id.get(coupon.user_id)) for coupon in items],
         "page": page,
         "page_size": page_size,
         "total": total,
@@ -728,9 +732,12 @@ def _serialize_template(t: CouponTemplate) -> dict:
     }
 
 
-def _serialize_coupon(coupon: UserCoupon) -> dict:
+def _serialize_coupon(coupon: UserCoupon, user: User | None = None) -> dict:
     return {
         "id": coupon.id,
+        "user_id": coupon.user_id,
+        "user_nickname": user.nickname if user else None,
+        "user_email": user.email if user else None,
         "coupon_no": coupon.coupon_no,
         "template_id": coupon.template_id,
         "name": coupon.name,

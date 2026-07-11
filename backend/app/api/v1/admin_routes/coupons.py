@@ -87,6 +87,9 @@ class TemplateOut(BaseModel):
 
 class CouponOut(BaseModel):
     id: int | None = None
+    user_id: int
+    user_nickname: str | None = None
+    user_email: str | None = None
     coupon_no: str
     template_id: int | None = None
     name: str

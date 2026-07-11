@@ -1,545 +1,262 @@
 # API 完善性分析报告
 
-检查对象：`D:/openapi.json`  
-检查时间：2026-07-08  
-API 标题：`3D Print Farm API`  
-API 版本：`0.1.0`
+检查时间：`2026-07-11`
+
+检查对象：当前 FastAPI 运行时代码生成的 OpenAPI
+
+设计基线：`Design/全流程系统与API设计文档.md`
 
 ## 1. 总体结论
 
-当前 OpenAPI 已经从早期“接口骨架”升级为“可用于前后端对齐的阶段 1 API 契约”，并完成了本轮 P0/P1 接口补强。
-
-相较上一版缺口报告，核心改善明显：
-
-- 接口数量从 40 个增加到 76 个。
-- 所有 `200` 成功响应都已经有 schema，不再是空对象。
-- 关键写接口的 `Idempotency-Key` 已在 OpenAPI 中标记为必填。
-- 管理端定制审核、报价、打印任务管理已经补齐。
-- 客户端订单列表/详情、定制需求列表已经补齐。
-- 商品分类、文件详情、管理端文件查看/下载、库存锁释放/消耗、材料损耗、排期详情/取消等接口已补齐。
-- 顶层 `dict[str, Any]` 泛化响应已清理为明确 response schema。
-
-但它还不能算“最终可交付 API 契约”。主要剩余问题是：
-
-- 嵌套字段中仍有少量聚合对象使用 `dict`，例如订单详情里的 `items/schedules/print_tasks`。
-- 已补常见错误响应声明，但具体业务错误 code 仍需要随 service 实现继续细化。
-- 已直接移除旧资源路径兼容入口，商品图片和排期明细只保留规范资源路径。
-- 部分 `PATCH` 接口仍复用创建模型，不适合局部更新。
-- 部分响应状态字段为了兼容写成 `enum | string`，OpenAPI 对前端约束不够硬。
-
-综合评价：
+当前 API 已覆盖 3D 打印农场的主要业务闭环：
 
 ```text
-API 覆盖度：较完整
-OpenAPI 文档质量：较完整
-前端联调可用性：可开始联调
-生产交付成熟度：不足
-下一阶段重点：接入真实数据库事务、细化嵌套对象 schema、补 OpenAPI examples
+注册登录
+-> 商品上架或定制申请
+-> 优惠券获取/使用
+-> 创建订单
+-> 管理员确认收款
+-> 排期和打印任务
+-> 打印完成入库
+-> 创建发货单和快递包裹
+-> 批量出库
+-> 订单 shipped
 ```
 
-## 2. 当前 OpenAPI 统计
+最新 OpenAPI：
 
-| 指标 | 数值 | 说明 |
+```text
+paths: 100
+operations: 131
+schemas: 197
+```
+
+结论分级：
+
+| 维度 | 结论 |
+|---|---|
+| 路由覆盖 | 完整，可覆盖主流程 |
+| 请求/响应模型 | 较完整，仍有少量松散嵌套结构 |
+| 数据库实现 | 主要接口已真实读写数据库 |
+| 认证授权 | 客户/管理员 Token 已隔离 |
+| 事务并发 | 部分关键路径已加锁，尚未全面统一 |
+| 幂等 | OpenAPI 已声明，通用服务未完成 |
+| 运行验证 | 静态检查通过，云端全流程回归仍需执行 |
+
+## 2. 模块统计
+
+| 模块 | Operations | 状态 |
 |---|---:|---|
-| Paths | 57 | OpenAPI paths 数量 |
-| Operations | 76 | GET/POST/PATCH/DELETE 接口总数 |
-| Components Schemas | 137 | Pydantic schema 数量 |
-| 空 `200` schema | 0 | 已解决上一版最严重文档问题 |
-| `Idempotency-Key` 接口 | 9 | 全部为 required |
-| 缺少鉴权声明的业务接口 | 0 | 登录和健康检查除外 |
-| 常见错误响应 | 已补 | `400/401/403/404/409/413/422/500` |
-| 顶层泛化响应接口 | 0 | 顶层响应已清理为明确 schema |
+| system | 1 | 可用 |
+| app-auth | 7 | 可用 |
+| app-products/categories | 4 | 可用 |
+| app-orders | 4 | 可用 |
+| app-files | 5 | 可用 |
+| app-custom-requests | 4 | 可用 |
+| app-quotes | 2 | 可用 |
+| app-coupons | 3 | 已修复列表和日期响应 |
+| admin-auth/accounts | 18 | 可用 |
+| admin-products/categories/images | 15 | 可用 |
+| admin-orders | 4 | 基础可用 |
+| admin-custom/quotes/files | 9 | 可用 |
+| admin-printers/tasks/schedules | 16 | 基础可用 |
+| admin-inventory | 12 | 基础可用 |
+| admin-warehouse | 19 | 主流程可用 |
+| admin-coupons | 6 | 已补模板状态和客户归属字段 |
 
-## 3. 模块覆盖情况
+## 3. 本轮已修复
 
-| 模块 | 接口数 | 完善度 | 评价 |
-|---|---:|---|---|
-| system | 1 | 基础可用 | 健康检查存在 |
-| app-auth | 1 | 骨架可用 | 未接真实验证码 |
-| app-product-categories | 1 | 基础可用 | 客户端分类查询存在 |
-| app-products | 3 | 基础可用 | 支持列表、详情、图片 |
-| app-orders | 3 | 阶段 1 可用 | 支持下单、订单列表、详情 |
-| app-files | 4 | 基础可用 | 缺真实下载流接口 |
-| app-custom-requests | 4 | 阶段 1 可用 | 支持提交、补充、列表、详情 |
-| app-quotes | 2 | 阶段 1 可用 | 支持报价查看和确认 |
-| admin-auth | 1 | 骨架可用 | 未接真实密码校验 |
-| admin-dashboard | 1 | 基础可用 | 指标字段已固定 schema |
-| admin-files | 2 | 基础可用 | 支持管理端文件详情和下载 URL |
-| admin-product-categories | 3 | 基础可用 | 支持分类维护 |
-| admin-products | 10 | 基础可用 | 商品/SKU/图片接口较全，响应已强类型化 |
-| admin-product-images | 2 | 基础可用 | 商品图片独立资源更新和删除 |
-| admin-orders | 4 | 阶段 1 可用 | 支持订单查询、状态、收款确认 |
-| admin-custom-requests | 3 | 阶段 1 可用 | 支持审核流程 |
-| admin-quotes | 3 | 阶段 1 可用 | 支持报价创建、列表、详情 |
-| admin-print-tasks | 4 | 阶段 1 可用 | 支持任务创建、查询、状态推进 |
-| admin-printers | 5 | 基础可用 | 支持打印机维护和人工状态更新 |
-| admin-schedules | 5 | 阶段 1 可用 | 支持排期、详情、取消 |
-| admin-schedule-items | 2 | 阶段 1 可用 | 排期明细独立资源详情和更新 |
-| admin-inventory | 12 | 阶段 1 可用 | 支持材料、锁定、损耗、成品查询 |
+### 3.1 客户优惠券列表
 
-## 4. P0 核心闭环检查
+原问题：
 
-### 4.1 已补齐的关键接口
+- `GET /api/v1/app/coupons` 未注册，只有 `/my`。
+- 日期字段声明为字符串，数据库返回 `datetime` 时可能触发响应校验 500。
+- 已过期但数据库仍为 `unused` 的券展示和筛选错误。
 
-以下上一版 P0 缺口已经补齐：
-
-| Method | Path | 状态 |
-|---|---|---|
-| GET | `/api/v1/admin/custom-requests` | 已有 |
-| GET | `/api/v1/admin/custom-requests/{request_id}` | 已有 |
-| PATCH | `/api/v1/admin/custom-requests/{request_id}/review` | 已有 |
-| POST | `/api/v1/admin/custom-requests/{request_id}/quote` | 已有 |
-| GET | `/api/v1/admin/quotes` | 已有 |
-| GET | `/api/v1/admin/quotes/{quote_id}` | 已有 |
-| GET | `/api/v1/admin/print-tasks` | 已有 |
-| POST | `/api/v1/admin/print-tasks` | 已有 |
-| GET | `/api/v1/admin/print-tasks/{task_id}` | 已有 |
-| PATCH | `/api/v1/admin/print-tasks/{task_id}/status` | 已有 |
-| GET | `/api/v1/app/orders` | 已有 |
-| GET | `/api/v1/app/orders/{order_no}` | 已有 |
-| GET | `/api/v1/app/custom-requests` | 已有 |
-
-结论：阶段 1 的主业务闭环已经具备 API 入口。
-
-### 4.2 当前仍影响闭环的 P0/P1 边界问题
-
-#### 问题 1：管理端缺少文件查看/下载接口
-
-本轮已补齐管理端文件接口：
+当前结果：
 
 ```text
-GET /api/v1/admin/files/{file_id}
-GET /api/v1/admin/files/{file_id}/download-url
+GET /api/v1/app/coupons       推荐路径
+GET /api/v1/app/coupons/my    兼容路径
 ```
 
-当前客户侧文件接口也已保留：
+日期字段已改为 `datetime`，过期状态按有效期动态计算。
 
-```text
-POST   /api/v1/app/files/upload
-GET    /api/v1/app/files/{file_id}
-GET    /api/v1/app/files/{file_id}/download-url
-DELETE /api/v1/app/files/{file_id}
-```
+### 3.2 管理员发券
 
-结论：定制审核和人工报价所需的后台文件查看入口已经具备。
+已增加：
 
-#### 问题 2：商品图片管理路径不统一
+- 用户存在和软删除校验。
+- 重复用户校验。
+- 单批最多 500 个用户。
+- 模板配额和每人限领校验。
+- 同模板并发发放锁。
+- 数据库约束异常转换为明确 `409`。
 
-当前只保留规范路径：
+### 3.3 管理员优惠券客户字段
 
-```text
-PATCH  /api/v1/admin/product-images/{image_id}
-DELETE /api/v1/admin/product-images/{image_id}
-```
-
-结论：商品图片作为独立资源维护，前端只需接入 `/api/v1/admin/product-images/{image_id}`。
-
-#### 问题 3：排期明细路径不统一
-
-当前只保留规范路径：
-
-```text
-GET   /api/v1/admin/production-schedule-items/{schedule_item_id}
-PATCH /api/v1/admin/production-schedule-items/{schedule_item_id}
-```
-
-结论：排期明细作为独立资源维护，后续扩展换机、取消、详情都放在该资源下。
-
-## 5. OpenAPI 文档质量检查
-
-### 5.1 成功响应 schema
-
-结果：
-
-```text
-空 200 schema：0
-```
-
-这是明显进步。当前所有接口都能在 OpenAPI 中看到响应结构。
-
-本轮已将顶层泛化响应清理为明确 schema。以下典型形式已不再作为顶层 `200` 响应出现：
-
-```text
-ApiResponse[dict[str, Any]]
-ApiResponse[PageResponse[dict[str, Any]]]
-```
-
-已补强的模型包括：
-
-- `AdminLoginResponse`
-- `AppLoginResponse`
-- `DashboardStats`
-- `ProductItem`
-- `ProductImageItem`
-- `ProductSkuItem`
-- `PrinterItem`
-- `AdminFileInfo`
-- `AdminFileDownloadUrl`
-- `MaterialStockLogItem`
-- `FinishedGoodsInventoryItem`
-- `ScheduleItemDetail`
-
-仍建议继续细化的是订单和定制需求详情里的嵌套聚合字段，例如：
-
-- `items`
-- `schedules`
-- `print_tasks`
-- `quotes`
-- `files`
-
-### 5.2 错误响应声明不足
-
-此前 69 个接口主要只声明：
-
-```text
-200
-422
-```
-
-部分无请求参数的接口甚至只有：
-
-```text
-200
-```
-
-本轮已在 FastAPI 默认 responses 中补充：
-
-```text
-400 Bad Request
-401 Unauthorized
-403 Forbidden
-404 Not Found
-409 Conflict
-413 Payload Too Large
-500 Internal Server Error
-```
-
-统一错误响应模型：
+`GET /api/v1/admin/coupons`、发放响应和作废响应现在返回：
 
 ```json
 {
-  "code": "RESOURCE_NOT_FOUND",
-  "message": "资源不存在",
+  "user_id": 12,
+  "user_nickname": "客户昵称",
+  "user_email": "user@example.com"
+}
+```
+
+用户信息采用批量查询，避免 N+1 查询。
+
+### 3.4 优惠券使用
+
+已增加：
+
+- 分类券和商品券适用范围校验。
+- 按适用商品小计计算折扣。
+- 模板 `max_discount` 上限。
+- 优惠券核销、作废的 SQL Server 行锁。
+- 固定有效期先后校验。
+- 模板状态值与数据库统一为 `active/disabled/archived`。
+
+### 3.5 错误日志
+
+未处理异常现在统一返回：
+
+```json
+{
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "服务器内部错误",
   "details": {}
 }
 ```
 
-下一步需要继续把具体业务错误 code 写进接口说明，例如库存不足、状态流转非法、重复幂等键、资源不存在。
+完整异常堆栈写入服务端日志，不直接泄露给客户端。
 
-### 5.3 状态枚举约束仍有松动
+## 4. 全流程覆盖审核
 
-部分 schema 中状态字段表现为：
+### 4.1 上架商品订单
 
-```text
-anyOf: [enum, string]
-```
-
-原因通常是代码里写了：
-
-```python
-status: SomeStatus | str
-```
-
-影响：
-
-- 文档虽然展示枚举，但同时允许任意字符串。
-- 前端代码生成时可能退化为普通 string。
-- 状态机约束没有真正固化到 API 契约。
-
-建议：
-
-- 请求模型必须严格使用枚举，不要 `| str`。
-- 响应模型也尽量使用枚举。
-- 如果考虑历史脏数据，可在 service 层兜底，不要放宽 OpenAPI 契约。
-
-### 5.4 PATCH 接口不应复用创建模型
-
-当前部分更新接口仍复用创建模型，例如：
-
-- `PATCH /api/v1/admin/products/{product_id}`
-- `PATCH /api/v1/admin/printers/{printer_id}`
-- `PATCH /api/v1/admin/production-schedule-orders/{schedule_order_id}`
-- `PATCH /api/v1/app/custom-requests/{request_id}`
-
-影响：
-
-- PATCH 本应支持局部更新。
-- 复用创建模型会导致字段被迫全量提交。
-- 前端编辑单个字段时体验较差，也容易覆盖旧值。
-
-建议：
-
-- 创建 `ProductUpdate`、`PrinterUpdate`、`ScheduleUpdate`、`CustomRequestSupplement`。
-- 更新模型中字段默认都为可选。
-- service 层只更新 `exclude_unset=True` 的字段。
-
-## 6. 幂等性检查
-
-当前以下接口已经要求 `Idempotency-Key`，且 OpenAPI 中为 required：
-
-| Method | Path | 状态 |
+| 环节 | 接口 | 结论 |
 |---|---|---|
-| POST | `/api/v1/app/orders/listed-product` | 已必填 |
-| POST | `/api/v1/app/custom-requests` | 已必填 |
-| POST | `/api/v1/app/quotes/{quote_id}/confirm` | 已必填 |
-| POST | `/api/v1/admin/orders/{order_id}/payment-confirm` | 已必填 |
-| POST | `/api/v1/admin/production-schedule-orders` | 已必填 |
-| POST | `/api/v1/admin/inventory/materials/{material_id}/stock-logs` | 已必填 |
-| POST | `/api/v1/admin/inventory/materials/{material_id}/loss` | 已必填 |
-| POST | `/api/v1/admin/inventory/locks/{lock_id}/release` | 已必填 |
-| POST | `/api/v1/admin/inventory/locks/{lock_id}/consume` | 已必填 |
+| 创建分类/商品/SKU | `/admin/product-categories`、`/admin/products` | 已有 |
+| 上传商品图片 | `/admin/products/{id}/images` | 已有 |
+| 商品上架 | `/admin/products/{id}/sales-status` | 已有 |
+| 客户浏览 | `/app/products` | 已有 |
+| 客户下单 | `/app/orders/listed-product` | 已有 |
+| 收款确认 | `/admin/orders/{id}/payment-confirm` | 已有 |
+| 排期/打印 | `/admin/production-schedule-orders`、`/admin/print-tasks` | 已有 |
+| 成品入库 | `/admin/print-tasks/{id}/transfer-to-warehouse` | 已有 |
+| 发货/出库 | `/admin/orders/{id}/shipments`、`/admin/warehouse/outbounds/*` | 已有 |
+| 客户物流查询 | `/app/orders/{order_no}/shipments` | 已有 |
 
-仍建议继续补充：
+### 4.2 个性化定制
 
-- `POST /api/v1/admin/print-tasks`
-- `POST /api/v1/admin/custom-requests/{request_id}/quote`
+| 环节 | 接口 | 结论 |
+|---|---|---|
+| 上传切片文件 | `/app/files/upload` | 已有 |
+| 提交申请 | `/app/custom-requests` | 已有 |
+| 管理员审核 | `/admin/custom-requests/{id}/review` | 已有 |
+| 创建报价 | `/admin/custom-requests/{id}/quote` | 已有 |
+| 客户确认 | `/app/quotes/{id}/confirm` | 已有 |
+| 后续生产发货 | 复用统一订单流程 | 已有 |
 
-原因：
+### 4.3 优惠券
 
-- 这些接口也会改变业务状态或库存数据。
-- 重复点击、网络重试、Caddy 超时重放都可能造成重复写入。
+| 环节 | 接口 | 结论 |
+|---|---|---|
+| 创建模板 | `/admin/coupons/templates` | 已有 |
+| 停用/归档模板 | `/admin/coupons/templates/{id}/status` | 已补 |
+| 管理员发券 | `/admin/coupons/grant` | 已有并加固 |
+| 客户抽奖 | `/app/coupons/lottery/draw` | 已有 |
+| 客户查询 | `/app/coupons` | 已补 |
+| 下单核销 | `/app/orders/listed-product` | 已有并加锁 |
 
-## 7. 鉴权检查
+## 5. P0 缺口
 
-结果：
+### 5.1 通用幂等尚未真正完成
 
-```text
-缺少鉴权声明的业务接口：0
-```
+`backend/app/services/idempotency_service.py` 仍为 TODO。多个接口要求 `Idempotency-Key`，但没有统一执行：
 
-说明除登录和健康检查外，业务接口都已经带 `HTTPBearer`。
+- 查询已处理请求。
+- 比较请求体哈希。
+- 保存首次响应。
+- 重复请求复用首次结果。
 
-仍需注意：
+影响：Flutter 重试、用户连点、Caddy 超时重放仍可能造成重复订单、排期、库存流水或出库单。
 
-- 当前文档只能表达“需要 Bearer Token”。
-- 还没有表达管理员角色、客户只能访问自己的资源、后台权限分级等约束。
-
-建议后续补：
-
-- 管理员角色：`admin`、`operator`、`finance`、`reviewer`。
-- 客户侧资源隔离：订单、文件、定制需求只能访问自己名下资源。
-- 对高风险接口补操作日志。
-
-## 8. 业务完整性检查
-
-### 8.1 上架商品链路
-
-已覆盖：
-
-- 商品分类维护。
-- 商品维护。
-- 商品图片维护。
-- SKU 维护。
-- 客户浏览商品。
-- 客户下单。
-- 管理员查询订单。
-- 管理员确认收款。
-- 排期和打印任务。
-
-仍建议补强：
-
-- 商品详情后台接口：`GET /api/v1/admin/products/{product_id}`。
-- SKU 删除/禁用接口。
-- 商品图片路径调整为 `/api/v1/admin/product-images/{image_id}`。
-- 管理端商品响应从 `dict[str, Any]` 改为明确模型。
-
-### 8.2 个性化定制链路
-
-已覆盖：
-
-- 客户上传文件。
-- 客户提交定制需求。
-- 客户补充定制需求。
-- 管理员查看定制需求。
-- 管理员审核定制需求。
-- 管理员创建报价。
-- 客户查看报价。
-- 客户确认报价。
-
-仍缺关键后台文件入口：
-
-- 管理员文件详情。
-- 管理员文件下载 URL。
-
-建议优先补齐，否则审核与报价人员只能看到 `file_id`，无法实际处理切片文件。
-
-### 8.3 排期和打印任务链路
-
-已覆盖：
-
-- 创建排期。
-- 查询排期列表。
-- 查看排期详情。
-- 更新排期。
-- 取消排期。
-- 更新排期明细。
-- 创建打印任务。
-- 查询打印任务。
-- 更新打印任务状态。
-
-仍建议补强：
-
-- 排期明细独立资源路径。
-- 打印任务状态流转错误 `409` 文档。
-- 打印任务开始/完成时自动更新打印机状态。
-- 打印任务失败时联动材料损耗或重排。
-
-### 8.4 库存链路
-
-已覆盖：
-
-- 库存总览。
-- 材料列表。
-- 创建材料。
-- 材料库存日志。
-- 材料损耗。
-- 库存锁列表。
-- 库存锁释放。
-- 库存锁消耗。
-- 成品库存列表。
-
-本轮已继续补强：
-
-- 材料详情：`GET /api/v1/admin/inventory/materials/{material_id}`。
-- 材料更新：`PATCH /api/v1/admin/inventory/materials/{material_id}`。
-- 材料库存日志列表：`GET /api/v1/admin/inventory/materials/{material_id}/stock-logs`。
-- 释放、消耗、损耗动作已加入幂等 Header。
-- 常见错误响应已写入 OpenAPI。
-
-仍建议后续结合真实 service 细化：
-
-- 库存不足。
-- 锁不存在。
-- 重复消耗。
-- 锁定状态非法。
-- 材料不存在。
-
-## 9. 建议修复优先级
-
-### P0：联调前建议立即补
-
-1. 管理端文件接口已完成：
+### 5.2 订单状态接口过于宽松
 
 ```text
-GET /api/v1/admin/files/{file_id}
-GET /api/v1/admin/files/{file_id}/download-url
+PATCH /api/v1/admin/orders/{order_id}/status
 ```
 
-2. 统一错误响应模型已完成基础覆盖：
+当前只限制状态值属于枚举，没有限制状态迁移路径。管理员可从 `submitted` 直接改为 `shipped`。应增加服务层迁移矩阵，非法迁移返回 `409 INVALID_STATE_TRANSITION`。
 
-```text
-401
-403
-404
-409
-413
-500
-```
+### 5.3 订单取消缺少统一补偿事务
 
-3. 下一步仍需将响应里的兼容型 `enum | string` 继续收紧为严格枚举。
+订单取消需要同时处理：
 
-4. 下一步仍需给定制审核、报价、打印任务、库存动作补真实数据库状态流转校验。
+- 已使用优惠券返还策略。
+- 材料库存锁释放。
+- 成品库存预留释放。
+- 排期和打印任务取消。
+- 发货单取消限制。
 
-### P1：前端强联调前补
+当前没有独立取消接口和完整补偿服务。
 
-1. 管理端商品、SKU、图片、打印机响应模型已从 `dict[str, Any]` 改为明确 schema。
-2. 商品图片管理推荐路径已新增：
+### 5.4 云端全流程测试未自动化
 
-```text
-/api/v1/admin/product-images/{image_id}
-```
+当前已有人工测试经验，但尚缺可重复执行、自动生成报告并清理测试数据的全流程测试。
 
-3. 排期明细推荐路径已新增：
+## 6. P1 缺口
 
-```text
-/api/v1/admin/production-schedule-items/{schedule_item_id}
-```
+- 部分订单、定制、排期响应中的嵌套字段仍使用松散字典。
+- 部分状态响应写为 `枚举 | str`，影响 Flutter 类型生成。
+- 部分 PATCH 接口仍复用创建模型，不是真正局部更新。
+- `page`、`page_size` 并非所有接口都通过 Pydantic 限制范围。
+- 优惠券过期状态目前查询时动态计算，尚无定时持久化任务。
+- 缺少操作日志查询 API，运维只能查数据库或服务日志。
+- Dashboard 尚未完整包含待入库、待发货、待出库等仓库指标。
 
-4. 部分 PATCH 接口已拆分独立更新模型，例如商品、打印机、材料；定制需求和排期仍可继续细化。
-5. `page/page_size` 增加范围约束，例如：
+## 7. OpenAPI 文档质量
 
-```text
-page >= 1
-1 <= page_size <= 100
-```
+优点：
 
-6. 库存释放、消耗、损耗已补 `Idempotency-Key`；报价创建和打印任务创建仍建议继续补。
+- 197 个 schema，主要请求和响应已有类型。
+- 28 个模块 tag 已提供中文职责说明。
+- 131 个操作均已提供中文 `summary` 和中文 `description`。
+- 业务接口具有 Bearer 鉴权声明。
+- 常见错误响应统一声明。
+- 优惠券路由、状态和客户归属字段已进入 OpenAPI。
 
-### P2：交付质量增强
+仍需完善：
 
-1. 给 OpenAPI 补 examples。
-2. 给接口补中文 summary/description。
-3. 增加操作日志查询接口。
-4. 增加后台角色权限说明。
-5. 增加分页排序字段，例如 `sort_by`、`sort_order`。
-6. 增加审计字段响应：`created_at`、`updated_at`、`created_by`、`updated_by`。
+- 当前中文说明由 OpenAPI 生成阶段统一补充，关键写接口仍应增加专用业务说明。
+- 为所有关键写接口增加请求和响应 examples。
+- 在 description 中列出业务错误码和允许的前置状态。
+- 为状态字段补充中文含义。
+- 为文件上传补充大小和类型限制。
+- 为幂等接口说明重复 key 的处理规则。
 
-## 10. 本轮新增接口清单
+## 8. 推荐实施顺序
 
-### 10.1 管理端文件：已新增
+1. 实现统一幂等服务并接入订单、排期、库存、仓库写接口。
+2. 建立订单状态迁移矩阵和独立取消接口。
+3. 编写云端全流程自动化测试。
+4. 收紧嵌套响应模型和状态枚举。
+5. 增加操作日志查询和仓库 Dashboard 指标。
+6. 补全 OpenAPI examples 与业务错误码说明。
 
-```text
-GET /api/v1/admin/files/{file_id}
-GET /api/v1/admin/files/{file_id}/download-url
-```
+## 9. 验收标准
 
-### 10.2 商品与 SKU：部分已新增
+进入稳定前后端联调前至少满足：
 
-```text
-GET    /api/v1/admin/products/{product_id}
-PATCH  /api/v1/admin/product-images/{image_id}
-DELETE /api/v1/admin/product-images/{image_id}
-```
-
-仍建议后续补：
-
-```text
-PATCH  /api/v1/admin/products/skus/{sku_id}/status
-```
-
-### 10.3 库存：已新增
-
-```text
-GET   /api/v1/admin/inventory/materials/{material_id}
-PATCH /api/v1/admin/inventory/materials/{material_id}
-GET   /api/v1/admin/inventory/materials/{material_id}/stock-logs
-```
-
-### 10.4 排期：已新增
-
-```text
-PATCH /api/v1/admin/production-schedule-items/{schedule_item_id}
-GET   /api/v1/admin/production-schedule-items/{schedule_item_id}
-```
-
-## 11. 下一步执行路线
-
-建议按下面顺序推进：
-
-1. 接入 SQLAlchemy service，开始验证真实业务状态流转。
-2. 为报价创建、打印任务创建补 `Idempotency-Key`。
-3. 继续收紧响应里的 `enum | string`。
-4. 细化订单详情、定制详情里的嵌套对象 schema。
-5. 给 OpenAPI 补 examples 和中文 description。
-6. 补 pytest 接口测试，覆盖状态流转、库存锁、幂等重复请求。
-
-## 12. 结论
-
-当前 API 已经可以作为阶段 1 的前后端联调基础，主流程覆盖度足够：
-
-```text
-上架商品 -> 下单 -> 收款确认 -> 排期 -> 打印任务
-个性化定制 -> 文件上传 -> 审核 -> 报价 -> 确认 -> 收款确认 -> 排期
-库存 -> 锁定 -> 释放/消耗/损耗
-打印机 -> 人工状态维护 -> 打印任务推进
-```
-
-但在进入稳定联调前，建议至少完成：
-
-- 管理端文件接口。
-- 统一错误响应。
-- 关键响应模型强类型化。
-- 路径命名统一。
-- PATCH 更新模型拆分。
-
-这几个点处理完后，OpenAPI 才更适合作为 Flutter APP 和电脑端管理后台的正式接口契约。
+- OpenAPI 可生成且 `100 paths / 131 operations` 不发生非预期减少。
+- 上架商品和定制订单均能到达 `shipped`。
+- 同一幂等键不会创建重复资源。
+- 同一优惠券不能被两个订单使用。
+- 同一打印任务不能重复入库。
+- 同一库存件不能进入多个发货单。
+- 数据库异常有请求路径和堆栈日志。
+- Flutter 能依据 OpenAPI 区分客户、管理员、状态和错误码。

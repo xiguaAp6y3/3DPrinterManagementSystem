@@ -10,11 +10,12 @@
 - 账号管理：后台客户账号 CRUD、后台管理员账号 CRUD，后台账号管理仅 `super_admin` 可操作。
 - API 文档：FastAPI 自动生成 Swagger / OpenAPI。
 
-最新 OpenAPI 规模：
+最新 OpenAPI 规模（2026-07-11）：
 
 ```text
-paths: 91
-operations: 121
+paths: 100
+operations: 131
+schemas: 197
 ```
 
 ## 技术栈
@@ -100,5 +101,7 @@ OpenAPI 导出到 D:\openapi.json
 ## 重要文档
 
 - [后端 README](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/backend/README.md)
-- [API 运行可用性检测报告](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/API运行可用性检测报告.md)
+- [已过时：API 运行可用性检测报告](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/已过时-API运行可用性检测报告.md)
+- [全流程系统与 API 设计文档](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/全流程系统与API设计文档.md)
+- [API 完善性分析报告](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/API完善性分析报告.md)
 - [仓库管理与账号体系扩展路线图](C:/Users/Gua3/Desktop/3DPrinterManagementSystem/Design/仓库管理与账号体系扩展路线图.md)
