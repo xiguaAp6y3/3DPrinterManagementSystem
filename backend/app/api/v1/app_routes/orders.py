@@ -126,6 +126,7 @@ def create_listed_product_order(payload: CreateListedProductOrderRequest, idempo
 
     # 优惠券抵扣：校验+计算折扣+锁定券，实付最低 0 元
     if payload.coupon_id:
+        db.flush()
         result = coupon_service.validate_and_apply_coupon(
             db=db,
             coupon_id=payload.coupon_id,

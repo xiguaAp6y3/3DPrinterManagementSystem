@@ -15,6 +15,7 @@ User-issued (lottery) coupons are constrained:
 - fixed_no_threshold: discount_value <= 5
 """
 
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -59,15 +60,15 @@ class CouponOut(BaseModel):
     scope_type: str = "all"
     source: str = "lottery"
     status: CouponStatus | str = "unused"
-    valid_from: str | None = None
-    valid_until: str | None = None
-    used_at: str | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    used_at: datetime | None = None
     used_order_id: int | None = None
     discount_amount: float | None = None
-    revoked_at: str | None = None
+    revoked_at: datetime | None = None
     revoke_reason: str | None = None
     created_by: int | None = None
-    created_at: str | None = None
+    created_at: datetime | None = None
 
 
 class LotteryDrawResult(BaseModel):
@@ -77,14 +78,14 @@ class LotteryDrawResult(BaseModel):
     coupon: CouponOut | None = None
     record_no: str
     remaining_draws: int = 0
-    created_at: str | None = None
+    created_at: datetime | None = None
 
 
 @router.post("/lottery/draw", response_model=ApiResponse[LotteryDrawResult])
 def draw_lottery(
     payload: LotteryDrawRequest,
     request: Request,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=100),
     current_user: dict = Depends(require_app_user),
     db: Session = Depends(get_db),
 ):
@@ -114,6 +115,7 @@ def draw_lottery(
     return success_response(result)
 
 
+@router.get("", response_model=ApiResponse[PageResponse[CouponOut]])
 @router.get("/my", response_model=ApiResponse[PageResponse[CouponOut]])
 def list_my_coupons(
     status: CouponStatus | None = None,

@@ -1,8 +1,14 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from starlette import status
+
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorResponse(BaseModel):
@@ -48,4 +54,20 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=error_response("VALIDATION_ERROR", "字段校验失败", exc.errors()),
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def handle_integrity_error(_: Request, exc: IntegrityError):
+        logger.warning("Database constraint violation", exc_info=exc)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=error_response("DATABASE_CONSTRAINT_VIOLATION", "数据约束冲突，请检查请求数据或数据库结构"),
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, exc: Exception):
+        logger.exception("Unhandled API error: %s %s", request.method, request.url.path, exc_info=exc)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=error_response("INTERNAL_SERVER_ERROR", "服务器内部错误"),
         )

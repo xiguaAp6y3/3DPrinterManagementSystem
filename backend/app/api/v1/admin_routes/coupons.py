@@ -25,7 +25,7 @@ router = APIRouter()
 DiscountType = Literal["percentage", "fixed", "fixed_no_threshold"]
 ScopeType = Literal["all", "category", "product"]
 ValidityType = Literal["relative", "fixed"]
-TemplateStatus = Literal["active", "inactive"]
+TemplateStatus = Literal["active", "disabled", "archived"]
 CouponStatus = Literal["unused", "used", "expired", "revoked"]
 
 
@@ -34,27 +34,31 @@ class TemplateCreateRequest(BaseModel):
     discount_type: DiscountType
     discount_value: float = Field(..., ge=0)
     min_spend: float = Field(0, ge=0)
-    max_discount: float | None = None
+    max_discount: float | None = Field(default=None, ge=0)
     scope_type: ScopeType = "all"
     scope_category_id: int | None = None
     scope_product_id: int | None = None
     validity_type: ValidityType = "relative"
-    valid_days: int | None = None
+    valid_days: int | None = Field(default=None, gt=0)
     fixed_start_at: datetime | None = None
     fixed_end_at: datetime | None = None
-    total_quota: int | None = None
-    per_user_limit: int | None = None
+    total_quota: int | None = Field(default=None, gt=0)
+    per_user_limit: int | None = Field(default=None, gt=0)
     remark: str | None = None
 
 
 class GrantRequest(BaseModel):
     template_id: int
-    user_ids: list[int] = Field(..., min_length=1)
+    user_ids: list[int] = Field(..., min_length=1, max_length=500)
     remark: str | None = None
 
 
 class RevokeRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
+
+
+class TemplateStatusUpdateRequest(BaseModel):
+    status: TemplateStatus
 
 
 class TemplateOut(BaseModel):
@@ -156,6 +160,17 @@ def list_templates(
         page_size=page_size,
     )
     return paginated_response(result["items"], result["page"], result["page_size"], result["total"])
+
+
+@router.patch("/templates/{template_id}/status", response_model=ApiResponse[TemplateOut])
+def update_template_status(
+    template_id: int,
+    payload: TemplateStatusUpdateRequest,
+    current_admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    result = coupon_service.admin_update_template_status(db, template_id, payload.status)
+    return success_response(result)
 
 
 @router.post("/grant", response_model=ApiResponse[GrantResult])

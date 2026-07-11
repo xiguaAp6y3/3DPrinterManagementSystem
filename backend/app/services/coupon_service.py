@@ -19,7 +19,7 @@ Order integration:
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from starlette import status
 
@@ -29,6 +29,10 @@ from app.db.models.core import (
     CouponTemplate,
     LotteryRecord,
     Order,
+    OrderItem,
+    Product,
+    ProductCategory,
+    User,
     UserCoupon,
 )
 from app.services.db_helpers import next_no, paginate, to_float
@@ -49,7 +53,7 @@ COUPON_VALID_DAYS = 30
 
 VALID_DISCOUNT_TYPES = {"percentage", "fixed", "fixed_no_threshold"}
 VALID_SCOPE_TYPES = {"all", "category", "product"}
-VALID_SOURCES = {"lottery", "admin_grant", "manual"}
+VALID_SOURCES = {"lottery", "admin_grant", "signup_gift", "promotion"}
 VALID_STATUSES = {"unused", "used", "expired", "revoked"}
 
 
@@ -74,6 +78,14 @@ def issue_lottery_coupon(
     The frontend has already decided the prize; this function validates,
     persists, and returns the coupon. User-issued coupons are constrained.
     """
+    locked_user = db.scalar(
+        select(User)
+        .where(User.id == user_id, User.deleted_at.is_(None))
+        .with_hint(User, "WITH (UPDLOCK, HOLDLOCK)", dialect_name="mssql")
+    )
+    if locked_user is None:
+        raise AppError("COUPON_USER_NOT_FOUND", "用户不存在或已删除", status.HTTP_404_NOT_FOUND)
+
     # 1. 校验券类型
     if discount_type not in VALID_DISCOUNT_TYPES:
         raise AppError(
@@ -224,6 +236,45 @@ def admin_create_template(
             status.HTTP_400_BAD_REQUEST,
         )
 
+    if scope_type == "category" and scope_category_id is None:
+        raise AppError(
+            "COUPON_SCOPE_TARGET_REQUIRED",
+            "分类券必须指定 scope_category_id",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    if scope_type == "category" and db.get(ProductCategory, scope_category_id) is None:
+        raise AppError(
+            "COUPON_SCOPE_TARGET_NOT_FOUND",
+            "指定的商品分类不存在",
+            status.HTTP_404_NOT_FOUND,
+        )
+    if scope_type == "product" and scope_product_id is None:
+        raise AppError(
+            "COUPON_SCOPE_TARGET_REQUIRED",
+            "商品券必须指定 scope_product_id",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    if scope_type == "product":
+        product = db.get(Product, scope_product_id)
+        if product is None or product.is_deleted:
+            raise AppError(
+                "COUPON_SCOPE_TARGET_NOT_FOUND",
+                "指定的商品不存在",
+                status.HTTP_404_NOT_FOUND,
+            )
+    if scope_type != "category" and scope_category_id is not None:
+        raise AppError(
+            "COUPON_SCOPE_TARGET_INVALID",
+            "非分类券不能指定 scope_category_id",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    if scope_type != "product" and scope_product_id is not None:
+        raise AppError(
+            "COUPON_SCOPE_TARGET_INVALID",
+            "非商品券不能指定 scope_product_id",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     if validity_type == "relative":
         if not valid_days or valid_days <= 0:
             raise AppError(
@@ -236,6 +287,12 @@ def admin_create_template(
             raise AppError(
                 "COUPON_INVALID_VALIDITY",
                 "固定有效期必须指定 fixed_start_at 和 fixed_end_at",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if fixed_end_at <= fixed_start_at:
+            raise AppError(
+                "COUPON_INVALID_VALIDITY",
+                "固定有效期结束时间必须晚于开始时间",
                 status.HTTP_400_BAD_REQUEST,
             )
     else:
@@ -298,7 +355,41 @@ def admin_grant_coupon(
     remark: str | None = None,
 ) -> dict:
     """Admin grants coupons from a template to specified users. No discount limits."""
-    template = db.get(CouponTemplate, template_id)
+    if not user_ids:
+        raise AppError(
+            "COUPON_USERS_REQUIRED",
+            "至少需要指定一个用户",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    if len(user_ids) != len(set(user_ids)):
+        raise AppError(
+            "COUPON_DUPLICATE_USERS",
+            "用户列表中不能包含重复用户",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    users = db.scalars(
+        select(User).where(
+            User.id.in_(user_ids),
+            User.deleted_at.is_(None),
+        )
+    ).all()
+    existing_user_ids = {user.id for user in users}
+    missing_user_ids = [user_id for user_id in user_ids if user_id not in existing_user_ids]
+    if missing_user_ids:
+        raise AppError(
+            "COUPON_USER_NOT_FOUND",
+            "部分用户不存在或已删除",
+            status.HTTP_404_NOT_FOUND,
+            details={"user_ids": missing_user_ids},
+        )
+
+    template = db.scalar(
+        select(CouponTemplate)
+        .where(CouponTemplate.id == template_id)
+        .with_hint(CouponTemplate, "WITH (UPDLOCK, HOLDLOCK)", dialect_name="mssql")
+    )
     if not template or template.status != "active":
         raise AppError(
             "COUPON_TEMPLATE_NOT_FOUND",
@@ -397,7 +488,11 @@ def admin_revoke_coupon(
     reason: str,
 ) -> dict:
     """Admin revokes a user coupon."""
-    coupon = db.get(UserCoupon, coupon_id)
+    coupon = db.scalar(
+        select(UserCoupon)
+        .where(UserCoupon.id == coupon_id)
+        .with_hint(UserCoupon, "WITH (UPDLOCK, HOLDLOCK)", dialect_name="mssql")
+    )
     if not coupon:
         raise AppError(
             "COUPON_NOT_FOUND",
@@ -437,8 +532,7 @@ def admin_list_coupons(
     stmt = select(UserCoupon).order_by(UserCoupon.created_at.desc())
     if user_id:
         stmt = stmt.where(UserCoupon.user_id == user_id)
-    if status_filter:
-        stmt = stmt.where(UserCoupon.status == status_filter)
+    stmt = _apply_coupon_status_filter(stmt, status_filter)
     items, page, page_size, total = paginate(db, stmt, page, page_size)
     return {
         "items": [_serialize_coupon(c) for c in items],
@@ -496,7 +590,11 @@ def validate_and_apply_coupon(
     Returns dict with: coupon_id, discount_amount, final_amount.
     Raises AppError on any validation failure.
     """
-    coupon = db.get(UserCoupon, coupon_id)
+    coupon = db.scalar(
+        select(UserCoupon)
+        .where(UserCoupon.id == coupon_id)
+        .with_hint(UserCoupon, "WITH (UPDLOCK, ROWLOCK)", dialect_name="mssql")
+    )
     if not coupon:
         raise AppError(
             "COUPON_NOT_FOUND",
@@ -535,12 +633,14 @@ def validate_and_apply_coupon(
             status.HTTP_409_CONFLICT,
         )
 
+    eligible_total = _coupon_eligible_total(db, coupon, order_id, order_total)
+
     # 4. 满减门槛校验
     min_spend_val = to_float(coupon.min_spend) or 0
-    if coupon.discount_type == "fixed" and order_total < min_spend_val:
+    if coupon.discount_type == "fixed" and eligible_total < min_spend_val:
         raise AppError(
             "COUPON_MIN_SPEND_NOT_MET",
-            f"订单金额 {order_total} 未满足最低消费 {to_float(coupon.min_spend)}",
+            f"适用商品金额 {eligible_total} 未满足最低消费 {to_float(coupon.min_spend)}",
             status.HTTP_409_CONFLICT,
         )
 
@@ -549,8 +649,13 @@ def validate_and_apply_coupon(
         coupon.discount_type,
         to_float(coupon.discount_value) or 0,
         to_float(coupon.min_spend) or 0,
-        order_total,
+        eligible_total,
     )
+
+    template = db.get(CouponTemplate, coupon.template_id) if coupon.template_id else None
+    max_discount = to_float(template.max_discount) if template else None
+    if max_discount is not None:
+        discount_amount = min(discount_amount, max_discount)
 
     # 6. 折扣地板：实付最低 0 元
     final_amount = max(order_total - discount_amount, 0.0)
@@ -584,8 +689,7 @@ def list_user_coupons(
         .where(UserCoupon.user_id == user_id)
         .order_by(UserCoupon.created_at.desc())
     )
-    if status_filter:
-        stmt = stmt.where(UserCoupon.status == status_filter)
+    stmt = _apply_coupon_status_filter(stmt, status_filter)
 
     items, page, page_size, total = paginate(db, stmt, page, page_size)
     return {
@@ -635,7 +739,7 @@ def _serialize_coupon(coupon: UserCoupon) -> dict:
         "min_spend": to_float(coupon.min_spend) or 0,
         "scope_type": coupon.scope_type,
         "source": coupon.source,
-        "status": coupon.status,
+        "status": _effective_coupon_status(coupon),
         "valid_from": coupon.valid_from,
         "valid_until": coupon.valid_until,
         "used_at": coupon.used_at,
@@ -646,6 +750,75 @@ def _serialize_coupon(coupon: UserCoupon) -> dict:
         "created_by": coupon.created_by,
         "created_at": coupon.created_at,
     }
+
+
+def admin_update_template_status(db: Session, template_id: int, template_status: str) -> dict:
+    if template_status not in {"active", "disabled", "archived"}:
+        raise AppError("COUPON_INVALID_STATUS", "不支持的优惠券模板状态", status.HTTP_400_BAD_REQUEST)
+    template = db.scalar(
+        select(CouponTemplate)
+        .where(CouponTemplate.id == template_id)
+        .with_hint(CouponTemplate, "WITH (UPDLOCK, HOLDLOCK)", dialect_name="mssql")
+    )
+    if template is None:
+        raise AppError("COUPON_TEMPLATE_NOT_FOUND", "优惠券模板不存在", status.HTTP_404_NOT_FOUND)
+    template.status = template_status
+    db.commit()
+    db.refresh(template)
+    return _serialize_template(template)
+
+
+def _coupon_eligible_total(db: Session, coupon: UserCoupon, order_id: int, order_total: float) -> float:
+    if coupon.scope_type == "all":
+        return order_total
+
+    template = db.get(CouponTemplate, coupon.template_id) if coupon.template_id else None
+    if template is None:
+        raise AppError(
+            "COUPON_SCOPE_INVALID",
+            "优惠券缺少有效的适用范围配置",
+            status.HTTP_409_CONFLICT,
+        )
+
+    order_items = db.scalars(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+    eligible_total = 0.0
+    for item in order_items:
+        if coupon.scope_type == "product" and item.product_id == template.scope_product_id:
+            eligible_total += to_float(item.subtotal) or 0
+        elif coupon.scope_type == "category":
+            product = db.get(Product, item.product_id) if item.product_id else None
+            if product and product.category_id == template.scope_category_id:
+                eligible_total += to_float(item.subtotal) or 0
+
+    if eligible_total <= 0:
+        raise AppError(
+            "COUPON_SCOPE_NOT_MATCHED",
+            "订单中没有该优惠券适用的商品",
+            status.HTTP_409_CONFLICT,
+        )
+    return eligible_total
+
+
+def _apply_coupon_status_filter(stmt, status_filter: str | None):
+    now = _utcnow()
+    if status_filter == "expired":
+        return stmt.where(
+            or_(
+                UserCoupon.status == "expired",
+                and_(UserCoupon.status == "unused", UserCoupon.valid_until < now),
+            )
+        )
+    if status_filter == "unused":
+        return stmt.where(UserCoupon.status == "unused", UserCoupon.valid_until >= now)
+    if status_filter:
+        return stmt.where(UserCoupon.status == status_filter)
+    return stmt
+
+
+def _effective_coupon_status(coupon: UserCoupon) -> str:
+    if coupon.status == "unused" and coupon.valid_until < _utcnow():
+        return "expired"
+    return coupon.status
 
 
 def _serialize_lottery_result(
