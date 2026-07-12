@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errors import AppError
+from app.core.time import utc_now
 from app.core.security import require_app_user
 from app.db.models.core import ModelFile
 from app.db.session import get_db
@@ -50,7 +51,7 @@ def upload_file(file: UploadFile = File(...), current_user: dict = Depends(requi
     user_id = current_user["user"].id
     directory = settings.upload_root / "model_files" / str(user_id)
     directory.mkdir(parents=True, exist_ok=True)
-    filename = f"{datetime.utcnow():%Y%m%d%H%M%S%f}_{safe_storage_name(file.filename or 'upload')}"
+    filename = f"{utc_now():%Y%m%d%H%M%S%f}_{safe_storage_name(file.filename or 'upload')}"
     storage_path = directory / filename
     storage_path.write_bytes(content)
     is_slice_file = suffix in {".gcode", ".3mf", ".bgcode", ".zip"}
@@ -97,7 +98,7 @@ def download_file(file_id: int, current_user: dict = Depends(require_app_user), 
 @router.delete("/{file_id}", response_model=ApiResponse[dict[str, int | str]])
 def delete_file(file_id: int, current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
     model_file = get_owned_file(db, file_id, current_user["user"].id)
-    model_file.deleted_at = datetime.utcnow()
+    model_file.deleted_at = utc_now()
     db.commit()
     return success_response({"file_id": file_id, "status": "deleted"})
 

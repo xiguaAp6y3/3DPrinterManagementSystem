@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.security import hash_password, require_admin
+from app.core.time import utc_now
 from app.db.models.core import AuthRefreshToken, StaffUser
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -144,7 +145,7 @@ def delete_staff_user(staff_user_id: int, current_admin: dict = Depends(require_
     if staff_user.role == "super_admin":
         ensure_not_last_super_admin(db, staff_user.id)
     staff_user.status = "deleted"
-    staff_user.deleted_at = datetime.utcnow()
+    staff_user.deleted_at = utc_now()
     revoke_staff_tokens(db, staff_user.id)
     db.commit()
     return success_response({"staff_user_id": staff_user.id, "status": "deleted"})
@@ -202,7 +203,7 @@ def require_active_row(staff_user: StaffUser | None) -> StaffUser:
 
 
 def revoke_staff_tokens(db: Session, staff_user_id: int) -> None:
-    now = datetime.utcnow()
+    now = utc_now()
     for token in db.scalars(select(AuthRefreshToken).where(AuthRefreshToken.staff_user_id == staff_user_id, AuthRefreshToken.revoked_at.is_(None))).all():
         token.revoked_at = now
 

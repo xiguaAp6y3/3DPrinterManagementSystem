@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.security import hash_password, require_admin
+from app.core.time import utc_now
 from app.db.models.core import AuthRefreshToken, User
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -125,7 +126,7 @@ def reset_user_password(user_id: int, payload: PasswordResetRequest, _: dict = D
 def delete_user(user_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     user = require_active_row(db.get(User, user_id))
     user.status = "deleted"
-    user.deleted_at = datetime.utcnow()
+    user.deleted_at = utc_now()
     revoke_user_tokens(db, user.id)
     db.commit()
     return success_response({"user_id": user.id, "status": "deleted"})
@@ -161,7 +162,7 @@ def require_active_row(user: User | None) -> User:
 
 
 def revoke_user_tokens(db: Session, user_id: int) -> None:
-    now = datetime.utcnow()
+    now = utc_now()
     for token in db.scalars(select(AuthRefreshToken).where(AuthRefreshToken.user_id == user_id, AuthRefreshToken.revoked_at.is_(None))).all():
         token.revoked_at = now
 

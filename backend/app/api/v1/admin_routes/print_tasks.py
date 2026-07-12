@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
+from app.core.time import utc_now
 from app.db.models.core import Order, PrintTask, Printer
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -92,9 +93,9 @@ def update_print_task_status(task_id: int, payload: PrintTaskStatusUpdate, _: di
     if payload.failure_reason is not None:
         task.failure_reason = payload.failure_reason
     if payload.status == "printing" and task.started_at is None:
-        task.started_at = datetime.utcnow()
+        task.started_at = utc_now()
     if payload.status in {"completed", "failed", "cancelled"}:
-        task.finished_at = datetime.utcnow()
+        task.finished_at = utc_now()
     if payload.status == "completed" and task.warehouse_status == "not_required":
         task.warehouse_status = "pending_inbound"
     if task.printer_id:

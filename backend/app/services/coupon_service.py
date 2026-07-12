@@ -16,7 +16,7 @@ Order integration:
   actual_payment = max(order_total - discount_amount, 0)  # 折扣地板 0 元
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select
@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from starlette import status
 
 from app.core.errors import AppError
+from app.core.time import utc_now
 from app.db.models.core import (
     CouponGrantBatch,
     CouponTemplate,
@@ -55,10 +56,6 @@ VALID_DISCOUNT_TYPES = {"percentage", "fixed", "fixed_no_threshold"}
 VALID_SCOPE_TYPES = {"all", "category", "product"}
 VALID_SOURCES = {"lottery", "admin_grant", "signup_gift", "promotion"}
 VALID_STATUSES = {"unused", "used", "expired", "revoked"}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # --- Lottery coupon issuance (user token) ------------------------------------
@@ -122,7 +119,7 @@ def issue_lottery_coupon(
         )
 
     # 5. 创建用户优惠券
-    now = _utcnow()
+    now = utc_now()
     coupon = UserCoupon(
         coupon_no=next_no(db, "seq_coupon_no", "UC"),
         user_id=user_id,
@@ -424,7 +421,7 @@ def admin_grant_coupon(
                     status.HTTP_409_CONFLICT,
                 )
 
-    now = _utcnow()
+    now = utc_now()
     success_count = 0
     coupons: list[UserCoupon] = []
 
@@ -514,7 +511,7 @@ def admin_revoke_coupon(
         )
 
     coupon.status = "revoked"
-    coupon.revoked_at = _utcnow()
+    coupon.revoked_at = utc_now()
     coupon.revoked_by = revoked_by
     coupon.revoke_reason = reason
     db.commit()
@@ -623,7 +620,7 @@ def validate_and_apply_coupon(
         )
 
     # 3. 有效期校验
-    now = _utcnow()
+    now = utc_now()
     if now < coupon.valid_from:
         raise AppError(
             "COUPON_NOT_YET_VALID",
@@ -807,7 +804,7 @@ def _coupon_eligible_total(db: Session, coupon: UserCoupon, order_id: int, order
 
 
 def _apply_coupon_status_filter(stmt, status_filter: str | None):
-    now = _utcnow()
+    now = utc_now()
     if status_filter == "expired":
         return stmt.where(
             or_(
@@ -823,7 +820,7 @@ def _apply_coupon_status_filter(stmt, status_filter: str | None):
 
 
 def _effective_coupon_status(coupon: UserCoupon) -> str:
-    if coupon.status == "unused" and coupon.valid_until < _utcnow():
+    if coupon.status == "unused" and coupon.valid_until < utc_now():
         return "expired"
     return coupon.status
 

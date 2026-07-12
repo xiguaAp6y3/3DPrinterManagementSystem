@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.security import require_app_user
+from app.core.time import utc_now
 from app.db.models.core import CustomRequest, Order, OrderItem, Quote
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, success_response
@@ -43,7 +44,7 @@ def get_quote(quote_id: int, current_user: dict = Depends(require_app_user), db:
 def confirm_quote(quote_id: int, idempotency_key: str = Header(alias="Idempotency-Key"), current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
     quote = get_user_quote(db, quote_id, current_user["user"].id)
     quote.status = "confirmed"
-    quote.confirmed_by_user_at = datetime.utcnow()
+    quote.confirmed_by_user_at = utc_now()
     custom_request = db.get(CustomRequest, quote.custom_request_id) if quote.custom_request_id else None
     if custom_request is not None:
         custom_request.status = "quote_confirmed"

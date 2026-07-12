@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
+from app.core.time import utc_now
 from app.db.models.core import CustomRequest, CustomRequestReview, ModelFile, Quote
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -74,7 +75,7 @@ def review_custom_request(request_id: int, payload: ReviewRequest, current_admin
     old_status = custom_request.status
     custom_request.status = payload.status
     custom_request.reviewer_id = current_admin["staff_user"].id
-    custom_request.reviewed_at = datetime.utcnow()
+    custom_request.reviewed_at = utc_now()
     custom_request.review_remark = payload.remark
     db.add(
         CustomRequestReview(
