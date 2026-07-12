@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from starlette import status
 
 from app.core.errors import AppError
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import (
     CouponGrantBatch,
     CouponTemplate,
@@ -119,7 +119,7 @@ def issue_lottery_coupon(
         )
 
     # 5. 创建用户优惠券
-    now = utc_now()
+    now = utc8_now()
     coupon = UserCoupon(
         coupon_no=next_no(db, "seq_coupon_no", "UC"),
         user_id=user_id,
@@ -421,7 +421,7 @@ def admin_grant_coupon(
                     status.HTTP_409_CONFLICT,
                 )
 
-    now = utc_now()
+    now = utc8_now()
     success_count = 0
     coupons: list[UserCoupon] = []
 
@@ -511,7 +511,7 @@ def admin_revoke_coupon(
         )
 
     coupon.status = "revoked"
-    coupon.revoked_at = utc_now()
+    coupon.revoked_at = utc8_now()
     coupon.revoked_by = revoked_by
     coupon.revoke_reason = reason
     db.commit()
@@ -620,7 +620,7 @@ def validate_and_apply_coupon(
         )
 
     # 3. 有效期校验
-    now = utc_now()
+    now = utc8_now()
     if now < coupon.valid_from:
         raise AppError(
             "COUPON_NOT_YET_VALID",
@@ -804,7 +804,7 @@ def _coupon_eligible_total(db: Session, coupon: UserCoupon, order_id: int, order
 
 
 def _apply_coupon_status_filter(stmt, status_filter: str | None):
-    now = utc_now()
+    now = utc8_now()
     if status_filter == "expired":
         return stmt.where(
             or_(
@@ -820,7 +820,7 @@ def _apply_coupon_status_filter(stmt, status_filter: str | None):
 
 
 def _effective_coupon_status(coupon: UserCoupon) -> str:
-    if coupon.status == "unused" and coupon.valid_until < utc_now():
+    if coupon.status == "unused" and coupon.valid_until < utc8_now():
         return "expired"
     return coupon.status
 

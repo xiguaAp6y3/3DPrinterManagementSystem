@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.security import require_admin
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import InventoryLock, Material, Order, Printer, PrintTask, ProductionScheduleItem, ProductionScheduleOrder
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -155,7 +155,7 @@ def cancel_schedule(schedule_order_id: int, _: dict = Depends(require_admin), db
         item.status = "cancelled"
     for lock in db.scalars(select(InventoryLock).where(InventoryLock.order_id == schedule.order_id, InventoryLock.status == "locked")).all():
         lock.status = "released"
-        lock.released_at = utc_now()
+        lock.released_at = utc8_now()
         if lock.material_id and lock.weight:
             material = db.get(Material, lock.material_id)
             if material:

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.security import require_admin
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import (
     OperationLog,
     Order,
@@ -342,7 +342,7 @@ def confirm_outbound(outbound_id: int, idempotency_key: str = Header(alias="Idem
     items = db.scalars(select(WarehouseOutboundItem).where(WarehouseOutboundItem.outbound_id == outbound.id)).all()
     affected_order_ids = set()
     affected_shipment_ids = set()
-    now = utc_now()
+    now = utc8_now()
     for item in items:
         stock_item = require_entity(db.get(WarehouseStockItem, item.stock_item_id), "库存件不存在")
         stock_item.status = "shipped"
@@ -411,7 +411,7 @@ def inbound_print_task(db: Session, task: PrintTask, warehouse_id: int, location
         custom_request_id=order_item.custom_request_id if order_item else None,
         quantity=quantity,
         status="available",
-        inbounded_at=utc_now(),
+        inbounded_at=utc8_now(),
         created_by=staff_user_id,
     )
     db.add(stock_item)

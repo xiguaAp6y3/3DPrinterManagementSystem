@@ -37,7 +37,7 @@ BEGIN
         d.status,
         i.status,
         TRY_CAST(SESSION_CONTEXT(N'staff_user_id') AS BIGINT),
-        SYSUTCDATETIME()
+        DATEADD(HOUR, 8, SYSUTCDATETIME())
     FROM inserted i
     INNER JOIN deleted d ON i.id = d.id
     WHERE ISNULL(i.status, N'') <> ISNULL(d.status, N'');
@@ -93,7 +93,7 @@ BEGIN
         CONCAT(N'payment_status=', d.payment_status),
         CONCAT(N'payment_status=', i.payment_status),
         N'订单人工收款确认',
-        SYSUTCDATETIME()
+        DATEADD(HOUR, 8, SYSUTCDATETIME())
     FROM inserted i
     INNER JOIN deleted d ON i.id = d.id
     WHERE d.payment_status <> N'confirmed'

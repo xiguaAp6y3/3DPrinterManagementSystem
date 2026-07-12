@@ -1,5 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+UTC8 = timezone(timedelta(hours=8))
+
+
+def utc8_now() -> datetime:
+    return datetime.now(UTC8).replace(tzinfo=None)

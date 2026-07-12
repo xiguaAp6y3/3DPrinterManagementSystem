@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import FinishedGoodsInventory, InventoryLock, Material, MaterialStockLog
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -212,7 +212,7 @@ def release_lock(lock_id: int, idempotency_key: str = Header(alias="Idempotency-
     lock = require_entity(db.get(InventoryLock, lock_id), "库存锁定不存在")
     if lock.status == "locked":
         lock.status = "released"
-        lock.released_at = utc_now()
+        lock.released_at = utc8_now()
         if lock.material_id and lock.weight:
             material = db.get(Material, lock.material_id)
             if material:
@@ -227,7 +227,7 @@ def consume_lock(lock_id: int, idempotency_key: str = Header(alias="Idempotency-
     lock = require_entity(db.get(InventoryLock, lock_id), "库存锁定不存在")
     if lock.status == "locked":
         lock.status = "consumed"
-        lock.released_at = utc_now()
+        lock.released_at = utc8_now()
         if lock.material_id and lock.weight:
             material = db.get(Material, lock.material_id)
             if material:

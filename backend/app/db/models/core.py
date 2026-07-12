@@ -1,16 +1,17 @@
-from sqlalchemy import BigInteger, Boolean, DateTime, FetchedValue, ForeignKey, Index, Integer, LargeBinary, Numeric, Unicode as String, UnicodeText as Text
+from sqlalchemy import BigInteger, Boolean, DateTime, FetchedValue, ForeignKey, Index, Integer, LargeBinary, Numeric, Unicode as String, UnicodeText as Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
-
 from app.db.session import Base
 
 
+utc8_timestamp = text("DATEADD(HOUR, 8, SYSUTCDATETIME())")
+
+
 class TimestampMixin:
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
     updated_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=False),
-        server_default=func.sysutcdatetime(),
-        onupdate=func.sysutcdatetime(),
+        server_default=utc8_timestamp,
+        onupdate=utc8_timestamp,
     )
 
 
@@ -57,7 +58,7 @@ class AuthRefreshToken(Base):
     staff_user_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"), index=True)
     expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), index=True)
     revoked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class ProductCategory(Base, TimestampMixin):
@@ -97,7 +98,7 @@ class ProductImage(Base):
     image_url: Mapped[str] = mapped_column(String(500))
     image_type: Mapped[str] = mapped_column(String(50))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
     product = relationship("Product", back_populates="images")
 
@@ -139,7 +140,7 @@ class ModelFile(Base):
     analysis_status: Mapped[str] = mapped_column(String(50), default="pending")
     owner_type: Mapped[str] = mapped_column(String(50), default="user")
     owner_id: Mapped[int] = mapped_column(BigInteger)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
     deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
 
 
@@ -173,7 +174,7 @@ class CustomRequestReview(Base):
     from_status: Mapped[str | None] = mapped_column(String(50))
     to_status: Mapped[str] = mapped_column(String(50))
     remark: Mapped[str | None] = mapped_column(String(1000))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class Quote(Base, TimestampMixin):
@@ -234,7 +235,7 @@ class OrderItem(Base):
     inbounded_quantity: Mapped[int] = mapped_column(Integer, default=0)
     shipped_quantity: Mapped[int] = mapped_column(Integer, default=0)
     subtotal: Mapped[float] = mapped_column(Numeric(18, 2))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class Printer(Base, TimestampMixin):
@@ -322,7 +323,7 @@ class PrinterStatusLog(Base):
     remaining_minutes: Mapped[int | None] = mapped_column(Integer)
     changed_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     raw_payload: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class Material(Base, TimestampMixin):
@@ -353,7 +354,7 @@ class FinishedGoodsInventory(Base):
     reserved_quantity: Mapped[int] = mapped_column(Integer, default=0)
     in_progress_quantity: Mapped[int] = mapped_column(Integer, default=0)
     warehouse_location: Mapped[str | None] = mapped_column(String(200))
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class Warehouse(Base, TimestampMixin):
@@ -413,7 +414,7 @@ class WarehouseInboundRecord(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     operator_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     remark: Mapped[str | None] = mapped_column(String(1000))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class Shipment(Base, TimestampMixin):
@@ -451,7 +452,7 @@ class ShipmentItem(Base):
     stock_item_id: Mapped[int] = mapped_column(ForeignKey("warehouse_stock_items.id"), index=True)
     order_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class WarehouseOutboundRecord(Base, TimestampMixin):
@@ -475,7 +476,7 @@ class WarehouseOutboundItem(Base):
     package_id: Mapped[int | None] = mapped_column(ForeignKey("shipment_packages.id"))
     stock_item_id: Mapped[int] = mapped_column(ForeignKey("warehouse_stock_items.id"), index=True)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class InventoryLock(Base):
@@ -493,7 +494,7 @@ class InventoryLock(Base):
     status: Mapped[str] = mapped_column(String(50), default="locked", index=True)
     locked_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
     released_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))
     row_version: Mapped[bytes | None] = mapped_column(LargeBinary(8), server_default=FetchedValue(), server_onupdate=FetchedValue())
 
@@ -511,7 +512,7 @@ class MaterialStockLog(Base):
     related_task_id: Mapped[int | None] = mapped_column(ForeignKey("print_tasks.id"))
     remark: Mapped[str | None] = mapped_column(String(1000))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class IdempotencyKey(Base):
@@ -528,7 +529,7 @@ class IdempotencyKey(Base):
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_by_staff_id: Mapped[int | None] = mapped_column(ForeignKey("staff_users.id"))
     expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class OperationLog(Base):
@@ -542,7 +543,7 @@ class OperationLog(Base):
     before_data: Mapped[str | None] = mapped_column(Text)
     after_data: Mapped[str | None] = mapped_column(Text)
     remark: Mapped[str | None] = mapped_column(String(1000))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class CouponTemplate(Base, TimestampMixin):
@@ -608,7 +609,7 @@ class CouponGrantBatch(Base):
     target_count: Mapped[int] = mapped_column(Integer)
     success_count: Mapped[int] = mapped_column(Integer, default=0)
     remark: Mapped[str | None] = mapped_column(String(1000))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
 class LotteryRecord(Base):
@@ -623,4 +624,4 @@ class LotteryRecord(Base):
     won_coupon_id: Mapped[int | None] = mapped_column(ForeignKey("user_coupons.id"))
     idempotency_key: Mapped[str] = mapped_column(String(100))
     client_ip: Mapped[str | None] = mapped_column(String(50))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=func.sysutcdatetime())
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)

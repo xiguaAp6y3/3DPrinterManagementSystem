@@ -13,7 +13,7 @@ from starlette import status
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import StaffUser, User
 from app.db.session import get_db
 
@@ -50,7 +50,7 @@ def hash_refresh_token(token: str) -> str:
 
 
 def refresh_token_expires_at() -> datetime:
-    return utc_now() + timedelta(days=settings.refresh_token_expire_days)
+    return utc8_now() + timedelta(days=settings.refresh_token_expire_days)
 
 
 def decode_token(token: str) -> dict[str, Any]:

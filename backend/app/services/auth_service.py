@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from starlette import status
 
 from app.core.errors import AppError
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -110,7 +110,7 @@ def app_login(db: Session, email: str, password: str) -> dict:
     if user.status != "active":
         raise AppError("AUTH_FORBIDDEN", "客户账号不可用", status.HTTP_403_FORBIDDEN)
 
-    user.last_login_at = utc_now()
+    user.last_login_at = utc8_now()
     access_token = _create_app_access_token(user)
     refresh_token = _save_refresh_token(db, "app", user_id=user.id)
     db.commit()
@@ -181,7 +181,7 @@ def update_app_profile(
                 AuthRefreshToken.revoked_at.is_(None),
             )
         ).all():
-            token.revoked_at = utc_now()
+            token.revoked_at = utc8_now()
 
     db.commit()
     db.refresh(user)
@@ -196,7 +196,7 @@ def admin_login(db: Session, username: str, password: str) -> dict:
     if staff_user.status != "active":
         raise AppError("AUTH_FORBIDDEN", "管理员账号不可用", status.HTTP_403_FORBIDDEN)
 
-    staff_user.last_login_at = utc_now()
+    staff_user.last_login_at = utc8_now()
     access_token = _create_admin_access_token(staff_user)
     refresh_token = _save_refresh_token(db, "admin", staff_user_id=staff_user.id)
     db.commit()
@@ -214,7 +214,7 @@ def refresh_app_token(db: Session, refresh_token: str) -> dict:
     if user is None or user.status != "active":
         raise AppError("AUTH_FORBIDDEN", "客户账号不可用", status.HTTP_403_FORBIDDEN)
 
-    token_record.revoked_at = utc_now()
+    token_record.revoked_at = utc8_now()
     new_refresh_token = _save_refresh_token(db, "app", user_id=user.id)
     access_token = _create_app_access_token(user)
     db.commit()
@@ -227,7 +227,7 @@ def refresh_admin_token(db: Session, refresh_token: str) -> dict:
     if staff_user is None or staff_user.status != "active":
         raise AppError("AUTH_FORBIDDEN", "管理员账号不可用", status.HTTP_403_FORBIDDEN)
 
-    token_record.revoked_at = utc_now()
+    token_record.revoked_at = utc8_now()
     new_refresh_token = _save_refresh_token(db, "admin", staff_user_id=staff_user.id)
     access_token = _create_admin_access_token(staff_user)
     db.commit()
@@ -243,7 +243,7 @@ def logout(db: Session, refresh_token: str, subject_type: str) -> None:
         )
     )
     if token_record is not None:
-        token_record.revoked_at = utc_now()
+        token_record.revoked_at = utc8_now()
         db.commit()
 
 
@@ -254,6 +254,6 @@ def _get_valid_refresh_token(db: Session, refresh_token: str, subject_type: str)
             AuthRefreshToken.subject_type == subject_type,
         )
     )
-    if token_record is None or token_record.revoked_at is not None or token_record.expires_at <= utc_now():
+    if token_record is None or token_record.revoked_at is not None or token_record.expires_at <= utc8_now():
         raise AppError("AUTH_INVALID_REFRESH_TOKEN", "refresh token 无效或已过期", status.HTTP_401_UNAUTHORIZED)
     return token_record

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import require_admin
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import Product, ProductImage, ProductSku
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -145,7 +145,7 @@ def upload_product_image(product_id: int, image_type: ImageType = "detail", sort
     stored_type = normalize_image_type(image_type)
     directory = settings.upload_root / "product_images" / str(product_id)
     directory.mkdir(parents=True, exist_ok=True)
-    filename = f"{utc_now():%Y%m%d%H%M%S%f}_{safe_storage_name(file.filename or 'image')}"
+    filename = f"{utc8_now():%Y%m%d%H%M%S%f}_{safe_storage_name(file.filename or 'image')}"
     storage_path = directory / filename
     content = file.file.read()
     storage_path.write_bytes(content)

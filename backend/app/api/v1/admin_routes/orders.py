@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import Order, OrderItem, PrintTask, ProductionScheduleOrder, Shipment, ShipmentPackage
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -95,7 +95,7 @@ def confirm_payment(order_id: int, payload: PaymentConfirmRequest | None = None,
     order.payment_status = "confirmed"
     order.status = "payment_confirmed"
     order.payment_confirmed_by = current_admin["staff_user"].id
-    order.payment_confirmed_at = utc_now()
+    order.payment_confirmed_at = utc8_now()
     if payload and payload.remark:
         order.admin_note = payload.remark
     db.commit()

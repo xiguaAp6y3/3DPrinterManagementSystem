@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_admin
-from app.core.time import utc_now
+from app.core.time import utc8_now
 from app.db.models.core import Printer, PrinterStatusLog
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
@@ -116,7 +116,7 @@ def update_printer_status(printer_id: int, payload: PrinterStatusUpdate, current
     printer.status = payload.status
     if payload.remark is not None:
         printer.remark = payload.remark
-    printer.last_seen_at = utc_now()
+    printer.last_seen_at = utc8_now()
     db.add(PrinterStatusLog(printer_id=printer.id, from_status=old_status, to_status=payload.status, changed_by=current_admin["staff_user"].id))
     db.commit()
     db.refresh(printer)
