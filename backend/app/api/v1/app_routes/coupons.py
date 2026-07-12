@@ -99,7 +99,8 @@ def draw_lottery(
     - fixed: discount_value <= min_spend * 20%（如满30最多减6）
     - fixed_no_threshold: discount_value <= 5（最多减5元）
 
-    每个用户最多抽奖 3 次。同一 Idempotency-Key 重复请求返回原结果。
+    每个用户按北京时间自然日每天最多抽奖 3 次，次日零点恢复次数。
+    同一 Idempotency-Key 重复请求返回原结果且不会重复计数。
     """
     client_ip = request.client.host if request.client else None
     result = coupon_service.issue_lottery_coupon(

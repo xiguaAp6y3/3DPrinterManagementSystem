@@ -40,8 +40,8 @@ from app.services.db_helpers import next_no, paginate, to_float
 
 # --- Constants --------------------------------------------------------------
 
-# 用户抽奖最多抽取次数（总计）
-MAX_DRAWS_PER_USER = 3
+# 用户每天最多抽奖次数（北京时间自然日）
+MAX_DAILY_DRAWS_PER_USER = 3
 
 # 用户抽奖折扣上限
 MIN_PERCENTAGE = 80   # 最多八折
@@ -105,21 +105,25 @@ def issue_lottery_coupon(
         coupon = db.get(UserCoupon, existing.won_coupon_id) if existing.won_coupon_id else None
         return _serialize_lottery_result(existing, coupon)
 
-    # 4. 抽奖次数限制（总计 MAX_DRAWS_PER_USER 次）
-    total_draws = db.scalar(
+    # 4. 抽奖次数限制（北京时间自然日内最多 MAX_DAILY_DRAWS_PER_USER 次）
+    now = utc8_now()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_day_start = day_start + timedelta(days=1)
+    daily_draws = db.scalar(
         select(func.count()).select_from(LotteryRecord).where(
             LotteryRecord.user_id == user_id,
+            LotteryRecord.created_at >= day_start,
+            LotteryRecord.created_at < next_day_start,
         )
     ) or 0
-    if total_draws >= MAX_DRAWS_PER_USER:
+    if daily_draws >= MAX_DAILY_DRAWS_PER_USER:
         raise AppError(
             "LOTTERY_DRAWS_EXHAUSTED",
-            f"抽奖次数已用尽（最多 {MAX_DRAWS_PER_USER} 次）",
+            f"今日抽奖次数已用尽（每天最多 {MAX_DAILY_DRAWS_PER_USER} 次）",
             status.HTTP_409_CONFLICT,
         )
 
     # 5. 创建用户优惠券
-    now = utc8_now()
     coupon = UserCoupon(
         coupon_no=next_no(db, "seq_coupon_no", "UC"),
         user_id=user_id,
@@ -153,7 +157,7 @@ def issue_lottery_coupon(
     db.refresh(coupon)
     db.refresh(record)
 
-    remaining = MAX_DRAWS_PER_USER - (total_draws + 1)
+    remaining = MAX_DAILY_DRAWS_PER_USER - (daily_draws + 1)
     return _serialize_lottery_result(record, coupon, remaining)
 
 
