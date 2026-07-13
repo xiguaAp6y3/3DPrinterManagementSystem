@@ -297,6 +297,16 @@ def delete_shipment(shipment_id: int, _: dict = Depends(require_admin), db: Sess
     shipment = require_entity(db.get(Shipment, shipment_id), "发货单不存在")
     if shipment.status not in {"draft", "ready"}:
         raise AppError("SHIPMENT_DELETE_FORBIDDEN", "当前发货单状态不允许删除", 409)
+    linked_outbound = db.scalar(
+        select(WarehouseOutboundRecord)
+        .join(WarehouseOutboundItem, WarehouseOutboundItem.outbound_id == WarehouseOutboundRecord.id)
+        .where(
+            WarehouseOutboundItem.shipment_id == shipment.id,
+            WarehouseOutboundRecord.status != "cancelled",
+        )
+    )
+    if linked_outbound is not None:
+        raise AppError("SHIPMENT_HAS_OUTBOUND", "发货单已关联出库单，不能撤销", 409)
     for item in db.scalars(select(ShipmentItem).where(ShipmentItem.shipment_id == shipment.id)).all():
         stock_item = db.get(WarehouseStockItem, item.stock_item_id)
         if stock_item and stock_item.status == "reserved":
@@ -314,6 +324,21 @@ def create_batch_outbound(payload: BatchOutboundCreate, idempotency_key: str = H
     shipments = db.scalars(select(Shipment).where(Shipment.id.in_(payload.shipment_ids))).all()
     if len(shipments) != len(set(payload.shipment_ids)):
         raise AppError("SHIPMENT_NOT_FOUND", "部分发货单不存在", 404)
+    existing_shipment_id = db.scalar(
+        select(WarehouseOutboundItem.shipment_id)
+        .join(WarehouseOutboundRecord, WarehouseOutboundRecord.id == WarehouseOutboundItem.outbound_id)
+        .where(
+            WarehouseOutboundItem.shipment_id.in_(payload.shipment_ids),
+            WarehouseOutboundRecord.status != "cancelled",
+        )
+    )
+    if existing_shipment_id is not None:
+        raise AppError(
+            "SHIPMENT_OUTBOUND_EXISTS",
+            "部分发货单已关联有效出库单",
+            409,
+            details={"shipment_id": existing_shipment_id},
+        )
     outbound = WarehouseOutboundRecord(outbound_no=next_no(db, "seq_outbound_no", "OB"), status="draft", outbound_type="shipment", operator_id=current_admin["staff_user"].id, remark=payload.remark)
     db.add(outbound)
     db.flush()
@@ -499,6 +524,16 @@ def serialize_inbound(item: WarehouseInboundRecord) -> dict[str, Any]:
 def serialize_shipment(db: Session, item: Shipment) -> dict[str, Any]:
     packages = db.scalars(select(ShipmentPackage).where(ShipmentPackage.shipment_id == item.id).order_by(ShipmentPackage.id)).all()
     shipment_items = db.scalars(select(ShipmentItem).where(ShipmentItem.shipment_id == item.id).order_by(ShipmentItem.id)).all()
+    outbound_item = db.scalar(
+        select(WarehouseOutboundItem)
+        .join(WarehouseOutboundRecord, WarehouseOutboundRecord.id == WarehouseOutboundItem.outbound_id)
+        .where(
+            WarehouseOutboundItem.shipment_id == item.id,
+            WarehouseOutboundRecord.status != "cancelled",
+        )
+        .order_by(WarehouseOutboundItem.id.desc())
+    )
+    outbound = db.get(WarehouseOutboundRecord, outbound_item.outbound_id) if outbound_item else None
     return {
         "id": item.id,
         "shipment_no": item.shipment_no,
@@ -508,6 +543,8 @@ def serialize_shipment(db: Session, item: Shipment) -> dict[str, Any]:
         "receiver_phone": item.receiver_phone,
         "receiver_address": item.receiver_address,
         "remark": item.remark,
+        "outbound_id": outbound.id if outbound else None,
+        "outbound_status": outbound.status if outbound else None,
         "packages": [
             {"id": package.id, "package_no": package.package_no, "carrier_code": package.carrier_code, "carrier_name": package.carrier_name, "tracking_no": package.tracking_no, "status": package.status}
             for package in packages
