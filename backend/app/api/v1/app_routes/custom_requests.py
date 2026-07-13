@@ -46,6 +46,7 @@ class CustomRequestDetail(CustomRequestSummary):
     filament_type: str | None = None
     review_remark: str | None = None
     quotes: list[dict[str, Any]] = Field(default_factory=list)
+    active_quote: dict[str, Any] | None = None
 
 
 @router.get("", response_model=ApiResponse[PageResponse[CustomRequestSummary]])
@@ -128,6 +129,7 @@ def serialize_custom_request(custom_request: CustomRequest, db: Session | None =
                 "filament_type": custom_request.filament_type,
                 "review_remark": custom_request.review_remark,
                 "quotes": [],
+                "active_quote": None,
             }
         )
         if db is not None:
@@ -143,4 +145,25 @@ def serialize_custom_request(custom_request: CustomRequest, db: Session | None =
                 }
                 for quote in quotes
             ]
+            active_quote = quotes[0] if quotes and quotes[0].status in {"sent", "confirmed"} else None
+            if active_quote is not None:
+                data["active_quote"] = serialize_active_quote(active_quote)
     return data
+
+
+def serialize_active_quote(quote: Quote) -> dict[str, Any]:
+    return {
+        "id": quote.id,
+        "quote_no": quote.quote_no,
+        "order_id": quote.order_id,
+        "estimated_price": to_float(quote.estimated_price),
+        "manual_price": to_float(quote.manual_price),
+        "estimated_days": quote.estimated_days,
+        "material_cost": to_float(quote.material_cost),
+        "machine_cost": to_float(quote.machine_cost),
+        "labor_cost": to_float(quote.labor_cost),
+        "post_processing_cost": to_float(quote.post_processing_cost),
+        "remark": quote.remark,
+        "status": quote.status,
+        "confirmed_by_user_at": quote.confirmed_by_user_at,
+    }
