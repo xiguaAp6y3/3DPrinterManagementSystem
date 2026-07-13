@@ -135,6 +135,7 @@ CREATE TABLE dbo.product_skus (
     size_label NVARCHAR(100) NULL,
     precision_level NVARCHAR(100) NULL,
     price DECIMAL(18,2) NOT NULL,
+    sale_stock_quantity INT NOT NULL CONSTRAINT DF_product_skus_sale_stock_quantity DEFAULT 0,
     min_quantity INT NOT NULL CONSTRAINT DF_product_skus_min_quantity DEFAULT 1,
     max_quantity INT NULL,
     status NVARCHAR(50) NOT NULL CONSTRAINT DF_product_skus_status DEFAULT N'active',
@@ -143,7 +144,8 @@ CREATE TABLE dbo.product_skus (
     CONSTRAINT FK_product_skus_product FOREIGN KEY (product_id) REFERENCES dbo.products(id),
     CONSTRAINT FK_product_skus_material FOREIGN KEY (material_id) REFERENCES dbo.materials(id),
     CONSTRAINT CK_product_skus_quantity CHECK (min_quantity > 0 AND (max_quantity IS NULL OR max_quantity >= min_quantity)),
-    CONSTRAINT CK_product_skus_price CHECK (price >= 0)
+    CONSTRAINT CK_product_skus_price CHECK (price >= 0),
+    CONSTRAINT CK_product_skus_sale_stock_quantity CHECK (sale_stock_quantity >= 0)
 );
 
 CREATE TABLE dbo.printers (
@@ -303,13 +305,15 @@ CREATE TABLE dbo.order_items (
     inbounded_quantity INT NOT NULL CONSTRAINT DF_order_items_inbounded_quantity DEFAULT 0,
     shipped_quantity INT NOT NULL CONSTRAINT DF_order_items_shipped_quantity DEFAULT 0,
     subtotal DECIMAL(18,2) NOT NULL,
+    fulfillment_mode NVARCHAR(50) NOT NULL CONSTRAINT DF_order_items_fulfillment_mode DEFAULT N'make_to_order',
     created_at DATETIME2(3) NOT NULL CONSTRAINT DF_order_items_created_at DEFAULT DATEADD(HOUR, 8, SYSUTCDATETIME()),
     CONSTRAINT FK_order_items_order FOREIGN KEY (order_id) REFERENCES dbo.orders(id),
     CONSTRAINT FK_order_items_product FOREIGN KEY (product_id) REFERENCES dbo.products(id),
     CONSTRAINT FK_order_items_sku FOREIGN KEY (sku_id) REFERENCES dbo.product_skus(id),
     CONSTRAINT FK_order_items_custom_request FOREIGN KEY (custom_request_id) REFERENCES dbo.custom_requests(id),
     CONSTRAINT CK_order_items_quantity CHECK (quantity > 0 AND produced_quantity >= 0 AND inbounded_quantity >= 0 AND shipped_quantity >= 0),
-    CONSTRAINT CK_order_items_amount CHECK (unit_price >= 0 AND subtotal >= 0)
+    CONSTRAINT CK_order_items_amount CHECK (unit_price >= 0 AND subtotal >= 0),
+    CONSTRAINT CK_order_items_fulfillment_mode CHECK (fulfillment_mode IN (N'in_stock', N'make_to_order'))
 );
 
 CREATE TABLE dbo.print_tasks (

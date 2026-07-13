@@ -140,6 +140,7 @@ def serialize_order_detail(db: Session, order: Order, shallow: bool = False) -> 
             "inbounded_quantity": item.inbounded_quantity,
             "shipped_quantity": item.shipped_quantity,
             "subtotal": to_float(item.subtotal) or 0,
+            "fulfillment_mode": item.fulfillment_mode,
         }
         for item in items
     ]

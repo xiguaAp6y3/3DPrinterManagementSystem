@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import require_app_user
@@ -25,6 +25,8 @@ class ProductListItem(BaseModel):
     sales_status: SalesStatus | str = "on_sale"
     production_mode: str = "make_to_order"
     base_price: float = 0
+    has_active_sku: bool = False
+    total_sale_stock_quantity: int = 0
     created_at: datetime | None = None
 
 
@@ -77,6 +79,21 @@ def list_product_images(product_id: int, _: dict = Depends(require_app_user), db
 
 
 def serialize_product(product: Product, db: Session | None = None) -> dict:
+    active_sku_count = 0
+    total_sale_stock_quantity = 0
+    if db is not None:
+        active_sku_count = db.scalar(
+            select(func.count()).select_from(ProductSku).where(
+                ProductSku.product_id == product.id,
+                ProductSku.status == "active",
+            )
+        ) or 0
+        total_sale_stock_quantity = db.scalar(
+            select(func.coalesce(func.sum(ProductSku.sale_stock_quantity), 0)).where(
+                ProductSku.product_id == product.id,
+                ProductSku.status == "active",
+            )
+        ) or 0
     return {
         "id": product.id,
         "category_id": product.category_id,
@@ -85,6 +102,8 @@ def serialize_product(product: Product, db: Session | None = None) -> dict:
         "sales_status": product.sales_status,
         "production_mode": product.production_mode,
         "base_price": to_float(product.base_price) or 0,
+        "has_active_sku": active_sku_count > 0,
+        "total_sale_stock_quantity": int(total_sale_stock_quantity),
         "created_at": product.created_at,
     }
 
@@ -98,6 +117,8 @@ def serialize_sku(sku: ProductSku) -> dict:
         "size_label": sku.size_label,
         "precision_level": sku.precision_level,
         "price": to_float(sku.price) or 0,
+        "sale_stock_quantity": sku.sale_stock_quantity,
+        "fulfillment_hint": "in_stock" if sku.sale_stock_quantity > 0 else "make_to_order",
         "min_quantity": sku.min_quantity,
         "max_quantity": sku.max_quantity,
         "status": sku.status,

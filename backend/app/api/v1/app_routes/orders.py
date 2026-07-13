@@ -41,6 +41,7 @@ class OrderSummary(BaseModel):
     total_amount: float = 0
     payment_status: PaymentStatus | str
     item_count: int = 0
+    fulfillment_modes: list[str] = Field(default_factory=list)
     user_coupon_id: int | None = None
     coupon_discount_amount: float = 0
     created_at: datetime | None = None
@@ -89,6 +90,10 @@ def get_order_shipments(order_no: str, current_user: dict = Depends(require_app_
 
 @router.post("/listed-product", response_model=ApiResponse[OrderSummary])
 def create_listed_product_order(payload: CreateListedProductOrderRequest, idempotency_key: str = Header(alias="Idempotency-Key"), current_user: dict = Depends(require_app_user), db: Session = Depends(get_db)):
+    sku_ids = [item.sku_id for item in payload.items]
+    if len(sku_ids) != len(set(sku_ids)):
+        raise AppError("DUPLICATE_ORDER_SKU", "同一订单中不能重复提交相同 SKU", 409)
+
     order = Order(
         order_no=next_no(db, "seq_order_no", "OD"),
         user_id=current_user["user"].id,
@@ -102,11 +107,24 @@ def create_listed_product_order(payload: CreateListedProductOrderRequest, idempo
     db.flush()
 
     total_amount = 0.0
-    for item in payload.items:
-        sku = require_entity(db.get(ProductSku, item.sku_id), "商品 SKU 不存在")
+    for item in sorted(payload.items, key=lambda value: value.sku_id):
+        sku = require_entity(
+            db.scalar(
+                select(ProductSku)
+                .where(ProductSku.id == item.sku_id)
+                .with_hint(ProductSku, "WITH (UPDLOCK, HOLDLOCK)", dialect_name="mssql")
+            ),
+            "商品 SKU 不存在",
+        )
         product = require_entity(db.get(Product, sku.product_id), "商品不存在")
         if product.is_deleted or product.sales_status != "on_sale" or sku.status != "active":
             require_entity(None, "商品不可下单")
+        if item.quantity < sku.min_quantity or (sku.max_quantity is not None and item.quantity > sku.max_quantity):
+            raise AppError("SKU_QUANTITY_INVALID", "购买数量不符合 SKU 限制", 409)
+        fulfillment_mode = "make_to_order"
+        if sku.sale_stock_quantity >= item.quantity:
+            sku.sale_stock_quantity -= item.quantity
+            fulfillment_mode = "in_stock"
         unit_price = to_float(sku.price) or 0
         subtotal = unit_price * item.quantity
         total_amount += subtotal
@@ -119,6 +137,7 @@ def create_listed_product_order(payload: CreateListedProductOrderRequest, idempo
                 unit_price=unit_price,
                 quantity=item.quantity,
                 subtotal=subtotal,
+                fulfillment_mode=fulfillment_mode,
             )
         )
 
@@ -145,6 +164,13 @@ def create_listed_product_order(payload: CreateListedProductOrderRequest, idempo
 
 def serialize_order_summary(db: Session, order: Order) -> dict:
     item_count = db.scalar(select(func.count()).select_from(OrderItem).where(OrderItem.order_id == order.id)) or 0
+    fulfillment_modes = list(
+        db.scalars(
+            select(OrderItem.fulfillment_mode)
+            .where(OrderItem.order_id == order.id)
+            .distinct()
+        ).all()
+    )
     return {
         "id": order.id,
         "order_no": order.order_no,
@@ -153,6 +179,7 @@ def serialize_order_summary(db: Session, order: Order) -> dict:
         "total_amount": to_float(order.total_amount) or 0,
         "payment_status": order.payment_status,
         "item_count": item_count,
+        "fulfillment_modes": fulfillment_modes,
         "user_coupon_id": order.user_coupon_id,
         "coupon_discount_amount": to_float(order.coupon_discount_amount) or 0,
         "created_at": order.created_at,
@@ -181,6 +208,7 @@ def serialize_order_detail(db: Session, order: Order) -> dict:
                     "inbounded_quantity": item.inbounded_quantity,
                     "shipped_quantity": item.shipped_quantity,
                     "subtotal": to_float(item.subtotal) or 0,
+                    "fulfillment_mode": item.fulfillment_mode,
                 }
                 for item in items
             ],

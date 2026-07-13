@@ -113,6 +113,7 @@ class ProductSku(Base, TimestampMixin):
     size_label: Mapped[str | None] = mapped_column(String(100))
     precision_level: Mapped[str | None] = mapped_column(String(100))
     price: Mapped[float] = mapped_column(Numeric(18, 2))
+    sale_stock_quantity: Mapped[int] = mapped_column(Integer, default=0)
     min_quantity: Mapped[int] = mapped_column(Integer, default=1)
     max_quantity: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(50), default="active", index=True)
@@ -235,6 +236,7 @@ class OrderItem(Base):
     inbounded_quantity: Mapped[int] = mapped_column(Integer, default=0)
     shipped_quantity: Mapped[int] = mapped_column(Integer, default=0)
     subtotal: Mapped[float] = mapped_column(Numeric(18, 2))
+    fulfillment_mode: Mapped[str] = mapped_column(String(50), default="make_to_order")
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=False), server_default=utc8_timestamp)
 
 
