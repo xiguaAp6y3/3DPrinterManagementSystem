@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -14,6 +14,8 @@ from app.db.models.core import (
     Order,
     OrderItem,
     PrintTask,
+    Product,
+    ProductSku,
     Shipment,
     ShipmentItem,
     ShipmentPackage,
@@ -78,6 +80,15 @@ class TransferOrderInboundRequest(BaseModel):
     remark: str | None = None
 
 
+class ManualFinishedGoodsInboundRequest(BaseModel):
+    warehouse_id: int
+    location_id: int | None = None
+    product_id: int
+    sku_id: int
+    quantity: int = Field(gt=0)
+    remark: str | None = None
+
+
 class ShipmentPackageCreate(BaseModel):
     carrier_code: str | None = None
     carrier_name: str | None = None
@@ -89,7 +100,8 @@ class ShipmentCreate(BaseModel):
     receiver_phone: str | None = None
     receiver_address: str | None = None
     packages: list[ShipmentPackageCreate] = Field(min_length=1)
-    stock_item_ids: list[int] = Field(min_length=1)
+    stock_item_ids: list[int] = Field(default_factory=list)
+    auto_allocate_by_sku: bool = True
     remark: str | None = None
 
 
@@ -196,6 +208,49 @@ def transfer_order_to_warehouse(order_id: int, payload: TransferOrderInboundRequ
     return success_response([serialize_inbound(item) for item in records])
 
 
+@router.post("/warehouse/manual-inbounds", response_model=ApiResponse[dict[str, Any]])
+def manual_finished_goods_inbound(payload: ManualFinishedGoodsInboundRequest, idempotency_key: str = Header(alias="Idempotency-Key"), current_admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    warehouse = require_entity(db.get(Warehouse, payload.warehouse_id), "仓库不存在")
+    if warehouse.status != "active":
+        raise AppError("WAREHOUSE_DISABLED", "仓库不可用", 409)
+    if payload.location_id is not None:
+        location = require_entity(db.get(WarehouseLocation, payload.location_id), "库位不存在")
+        if location.warehouse_id != warehouse.id:
+            raise AppError("LOCATION_WAREHOUSE_MISMATCH", "库位不属于该仓库", 409)
+    require_entity(db.get(Product, payload.product_id), "商品不存在")
+    sku = require_entity(db.get(ProductSku, payload.sku_id), "商品 SKU 不存在")
+    if sku.product_id != payload.product_id:
+        raise AppError("SKU_PRODUCT_MISMATCH", "SKU 不属于该商品", 409)
+
+    stock_item = WarehouseStockItem(
+        stock_item_no=next_no(db, "seq_stock_item_no", "ST"),
+        warehouse_id=warehouse.id,
+        location_id=payload.location_id,
+        product_id=payload.product_id,
+        sku_id=sku.id,
+        quantity=payload.quantity,
+        status="available",
+        inbounded_at=utc8_now(),
+        created_by=current_admin["staff_user"].id,
+    )
+    db.add(stock_item)
+    db.flush()
+    record = WarehouseInboundRecord(
+        inbound_no=next_no(db, "seq_inbound_no", "IN"),
+        inbound_type="manual_adjustment",
+        warehouse_id=warehouse.id,
+        location_id=payload.location_id,
+        stock_item_id=stock_item.id,
+        quantity=payload.quantity,
+        operator_id=current_admin["staff_user"].id,
+        remark=payload.remark,
+    )
+    db.add(record)
+    db.add(OperationLog(operator_id=current_admin["staff_user"].id, operation_type="manual_finished_goods_inbound", target_table="warehouse_stock_items", target_id=stock_item.id, remark=payload.remark))
+    db.commit()
+    return success_response(serialize_inbound(record))
+
+
 @router.get("/warehouse/stock-items", response_model=ApiResponse[PageResponse[dict[str, Any]]])
 def list_stock_items(page: int = 1, page_size: int = 20, order_id: int | None = None, status: str | None = None, warehouse_id: int | None = None, location_id: int | None = None, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     stmt = select(WarehouseStockItem).order_by(WarehouseStockItem.created_at.desc())
@@ -225,17 +280,8 @@ def list_inbounds(page: int = 1, page_size: int = 20, order_id: int | None = Non
 @router.post("/orders/{order_id}/shipments", response_model=ApiResponse[dict[str, Any]])
 def create_order_shipment(order_id: int, payload: ShipmentCreate, idempotency_key: str = Header(alias="Idempotency-Key"), current_admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
     order = require_entity(db.get(Order, order_id), "订单不存在")
-    if order.status not in {"ready_to_ship", "in_warehouse", "partially_shipped", "shipping"}:
+    if order.status not in {"payment_confirmed", "scheduled", "ready_to_ship", "in_warehouse", "partially_shipped", "shipping"}:
         raise AppError("ORDER_NOT_READY_TO_SHIP", "订单当前状态不允许创建发货单", 409)
-    stock_items = db.scalars(select(WarehouseStockItem).where(WarehouseStockItem.id.in_(payload.stock_item_ids))).all()
-    if len(stock_items) != len(set(payload.stock_item_ids)):
-        raise AppError("STOCK_ITEM_NOT_FOUND", "部分库存件不存在", 404)
-    for item in stock_items:
-        if item.order_id != order_id:
-            raise AppError("STOCK_ITEM_ORDER_MISMATCH", "库存件不属于该订单", 409)
-        if item.status != "available":
-            raise AppError("STOCK_ITEM_NOT_AVAILABLE", "库存件不可发货", 409)
-
     shipment = Shipment(
         shipment_no=next_no(db, "seq_shipment_no", "SP"),
         order_id=order_id,
@@ -263,14 +309,108 @@ def create_order_shipment(order_id: int, payload: ShipmentCreate, idempotency_ke
         packages.append(package)
     db.flush()
 
+    if payload.auto_allocate_by_sku or not payload.stock_item_ids:
+        allocations = allocate_order_stock_by_sku(db, order)
+    else:
+        allocations = allocate_selected_order_stock(db, order, payload.stock_item_ids)
+
     first_package_id = packages[0].id
-    for item in stock_items:
-        item.status = "reserved"
-        db.add(ShipmentItem(shipment_id=shipment.id, package_id=first_package_id, stock_item_id=item.id, order_item_id=item.order_item_id, quantity=item.quantity))
+    for stock_item, order_item, quantity in allocations:
+        db.add(ShipmentItem(shipment_id=shipment.id, package_id=first_package_id, stock_item_id=stock_item.id, order_item_id=order_item.id, quantity=quantity))
     order.status = "shipping"
     db.commit()
     db.refresh(shipment)
     return success_response(serialize_shipment(db, shipment))
+
+
+def allocate_order_stock_by_sku(db: Session, order: Order) -> list[tuple[WarehouseStockItem, OrderItem, int]]:
+    allocations: list[tuple[WarehouseStockItem, OrderItem, int]] = []
+    order_items = db.scalars(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)).all()
+    for order_item in order_items:
+        if order_item.sku_id is None or order_item.product_id is None:
+            raise AppError("ORDER_ITEM_SKU_REQUIRED", "定制商品没有可匹配的 SKU 库存，不能自动发货", 409, details={"order_item_id": order_item.id})
+        reserved_quantity = db.scalar(
+            select(func.coalesce(func.sum(ShipmentItem.quantity), 0))
+            .join(Shipment, Shipment.id == ShipmentItem.shipment_id)
+            .where(
+                Shipment.order_id == order.id,
+                ShipmentItem.order_item_id == order_item.id,
+                Shipment.status == "ready",
+            )
+        ) or 0
+        required_quantity = order_item.quantity - order_item.shipped_quantity - int(reserved_quantity)
+        if required_quantity <= 0:
+            continue
+        stock_items = db.scalars(
+            select(WarehouseStockItem)
+            .where(
+                WarehouseStockItem.status == "available",
+                WarehouseStockItem.product_id == order_item.product_id,
+                WarehouseStockItem.sku_id == order_item.sku_id,
+            )
+            .order_by(WarehouseStockItem.inbounded_at, WarehouseStockItem.id)
+        ).all()
+        available_quantity = sum(stock_item.quantity for stock_item in stock_items)
+        if available_quantity < required_quantity:
+            raise AppError(
+                "INSUFFICIENT_SKU_STOCK",
+                "仓库中可用 SKU 成品不足，无法发货",
+                409,
+                details={"order_item_id": order_item.id, "sku_id": order_item.sku_id, "required": required_quantity, "available": available_quantity},
+            )
+        remaining_quantity = required_quantity
+        for stock_item in stock_items:
+            if remaining_quantity == 0:
+                break
+            allocation_quantity = min(stock_item.quantity, remaining_quantity)
+            allocated_stock_item = reserve_stock_item(db, stock_item, order, order_item, allocation_quantity)
+            allocations.append((allocated_stock_item, order_item, allocation_quantity))
+            remaining_quantity -= allocation_quantity
+    if not allocations:
+        raise AppError("ORDER_ALREADY_ALLOCATED", "订单没有待发货商品", 409)
+    return allocations
+
+
+def reserve_stock_item(db: Session, stock_item: WarehouseStockItem, order: Order, order_item: OrderItem, quantity: int) -> WarehouseStockItem:
+    if quantity == stock_item.quantity:
+        stock_item.status = "reserved"
+        return stock_item
+
+    stock_item.quantity -= quantity
+    reserved_stock_item = WarehouseStockItem(
+        stock_item_no=next_no(db, "seq_stock_item_no", "ST"),
+        warehouse_id=stock_item.warehouse_id,
+        location_id=stock_item.location_id,
+        order_id=order.id,
+        order_item_id=order_item.id,
+        print_task_id=stock_item.print_task_id,
+        product_id=stock_item.product_id,
+        sku_id=stock_item.sku_id,
+        custom_request_id=stock_item.custom_request_id,
+        quantity=quantity,
+        status="reserved",
+        inbounded_at=stock_item.inbounded_at,
+        created_by=stock_item.created_by,
+    )
+    db.add(reserved_stock_item)
+    db.flush()
+    return reserved_stock_item
+
+
+def allocate_selected_order_stock(db: Session, order: Order, stock_item_ids: list[int]) -> list[tuple[WarehouseStockItem, OrderItem, int]]:
+    stock_items = db.scalars(select(WarehouseStockItem).where(WarehouseStockItem.id.in_(stock_item_ids))).all()
+    if len(stock_items) != len(set(stock_item_ids)):
+        raise AppError("STOCK_ITEM_NOT_FOUND", "部分库存件不存在", 404)
+    allocations = []
+    for stock_item in stock_items:
+        if stock_item.order_id != order.id:
+            raise AppError("STOCK_ITEM_ORDER_MISMATCH", "库存件不属于该订单", 409)
+        if stock_item.status != "available":
+            raise AppError("STOCK_ITEM_NOT_AVAILABLE", "库存件不可发货", 409)
+        order_item = require_entity(db.get(OrderItem, stock_item.order_item_id), "库存件未关联订单明细")
+        stock_item.status = "reserved"
+        allocations.append((stock_item, order_item, stock_item.quantity))
+    return allocations
 
 
 @router.get("/orders/{order_id}/shipments", response_model=ApiResponse[list[dict[str, Any]]])
@@ -372,10 +512,17 @@ def confirm_outbound(outbound_id: int, idempotency_key: str = Header(alias="Idem
         stock_item = require_entity(db.get(WarehouseStockItem, item.stock_item_id), "库存件不存在")
         stock_item.status = "shipped"
         stock_item.outbounded_at = now
-        affected_order_ids.add(stock_item.order_id)
+        shipment = require_entity(db.get(Shipment, item.shipment_id), "发货单不存在")
+        affected_order_ids.add(shipment.order_id)
         affected_shipment_ids.add(item.shipment_id)
-        if stock_item.order_item_id:
-            order_item = db.get(OrderItem, stock_item.order_item_id)
+        shipment_item = db.scalar(
+            select(ShipmentItem).where(
+                ShipmentItem.shipment_id == shipment.id,
+                ShipmentItem.stock_item_id == stock_item.id,
+            )
+        )
+        if shipment_item and shipment_item.order_item_id:
+            order_item = db.get(OrderItem, shipment_item.order_item_id)
             if order_item:
                 order_item.shipped_quantity += item.quantity
     for shipment_id in affected_shipment_ids:
@@ -524,6 +671,7 @@ def serialize_inbound(item: WarehouseInboundRecord) -> dict[str, Any]:
     return {
         "id": item.id,
         "inbound_no": item.inbound_no,
+        "inbound_type": item.inbound_type,
         "warehouse_id": item.warehouse_id,
         "location_id": item.location_id,
         "order_id": item.order_id,
@@ -531,6 +679,7 @@ def serialize_inbound(item: WarehouseInboundRecord) -> dict[str, Any]:
         "print_task_id": item.print_task_id,
         "stock_item_id": item.stock_item_id,
         "quantity": item.quantity,
+        "remark": item.remark,
         "created_at": item.created_at,
     }
 

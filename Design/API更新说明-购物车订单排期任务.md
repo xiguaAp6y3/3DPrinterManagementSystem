@@ -61,6 +61,40 @@
 
 订单可以包含不同商品的 SKU。例如 `sku_id: 31` 和 `sku_id: 32` 可以分别属于不同的 `product_id`；后端会为每个 SKU 分别创建对应的订单明细，并保留各自的商品、SKU、数量和履约状态。唯一限制是同一 SKU 在一次请求中只能出现一次，重复数量应由前端合并后填写在 `quantity` 中。
 
+## 手动成品入库与 SKU 自动发货
+
+先执行 `deploy/sql/009_allow_manual_finished_goods_inbound.sql`，使仓库库存和入库记录可不关联订单。
+
+### 手动成品入库
+
+`POST /api/v1/admin/warehouse/manual-inbounds`
+
+```json
+{
+  "warehouse_id": 1,
+  "location_id": 2,
+  "product_id": 12,
+  "sku_id": 31,
+  "quantity": 10,
+  "remark": "备货入库"
+}
+```
+
+该接口创建 `manual_adjustment` 入库记录和可用库存批次，不绑定客户订单。
+
+### 按 SKU 自动分配发货库存
+
+`POST /api/v1/admin/orders/{order_id}/shipments` 新增/默认使用 `auto_allocate_by_sku`：
+
+```json
+{
+  "packages": [{ "carrier_name": "顺丰", "tracking_no": "SF123" }],
+  "auto_allocate_by_sku": true
+}
+```
+
+系统按订单明细中的 `product_id + sku_id` 汇总待发数量，从所有 `available` 状态的仓库库存中按入库顺序预留。库存可以来自其他订单的生产入库或手动入库；若同 SKU 可用数量不足，返回 `INSUFFICIENT_SKU_STOCK` 并提供所需数量与可用数量。库存批次大于本次需求时，系统会自动拆出本次预留批次，剩余库存继续保持可用。
+
 ## 打印任务数量与物品
 
 `PrintTask` 及 `POST /api/v1/admin/print-tasks` 新增字段：
