@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError
 from app.core.security import require_admin
 from app.core.time import utc8_now
-from app.db.models.core import InventoryLock, Material, Order, Printer, PrintTask, ProductionScheduleItem, ProductionScheduleOrder
+from app.db.models.core import InventoryLock, Material, Order, OrderItem, Printer, PrintTask, ProductionScheduleItem, ProductionScheduleOrder
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import next_no, paginate, require_entity, to_float
+from app.services.order_items import serialize_order_item
 
 router = APIRouter()
 
@@ -41,10 +42,29 @@ class ScheduleCreate(BaseModel):
     material_locks: list[MaterialLockCreate] = Field(default_factory=list)
 
 
+class SchedulePrintTaskCreate(BaseModel):
+    order_item_id: int
+    printer_id: int
+    scheduled_start_at: datetime
+    scheduled_end_at: datetime
+    slice_file_id: int | None = None
+    material_id: int | None = None
+    priority: int = 0
+    plate_count: int = Field(default=1, gt=0)
+    planned_quantity: int = Field(default=1, gt=0)
+    use_ams: bool = False
+    estimated_minutes: int | None = Field(default=None, ge=0)
+
+
+class SchedulePrintTaskBatchCreate(BaseModel):
+    tasks: list[SchedulePrintTaskCreate] = Field(min_length=1)
+
+
 class ScheduleItemDetail(BaseModel):
     id: int | None = None
     schedule_order_id: int | None = None
     print_task_id: int | None = None
+    print_task: dict[str, Any] | None = None
     printer_id: int | None = None
     scheduled_start_at: datetime | None = None
     scheduled_end_at: datetime | None = None
@@ -61,6 +81,8 @@ class ScheduleDetail(BaseModel):
     planned_end_at: datetime | None = None
     due_at: datetime | None = None
     priority: int = 0
+    order_items: list[dict[str, Any]] = Field(default_factory=list)
+    print_tasks: list[dict[str, Any]] = Field(default_factory=list)
     items: list[ScheduleItemDetail] = Field(default_factory=list)
     material_locks: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -106,6 +128,8 @@ def create_schedule(payload: ScheduleCreate, idempotency_key: str = Header(alias
         require_entity(db.get(Printer, item.printer_id), "打印机不存在")
         if item.print_task_id is not None:
             task = require_entity(db.get(PrintTask, item.print_task_id), "打印任务不存在")
+            if task.order_id != order.id:
+                raise AppError("SCHEDULE_TASK_ORDER_MISMATCH", "打印任务不属于该订单", 409)
             task.status = "scheduled"
             task.printer_id = item.printer_id
         db.add(ProductionScheduleItem(schedule_order_id=schedule.id, sort_order=idx, status="scheduled", **item.model_dump()))
@@ -125,6 +149,59 @@ def create_schedule(payload: ScheduleCreate, idempotency_key: str = Header(alias
 @router.get("/{schedule_order_id}", response_model=ApiResponse[ScheduleDetail])
 def get_schedule(schedule_order_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     schedule = require_entity(db.get(ProductionScheduleOrder, schedule_order_id), "排期不存在")
+    return success_response(serialize_schedule(db, schedule))
+
+
+@router.post("/{schedule_order_id}/print-tasks", response_model=ApiResponse[ScheduleDetail])
+def create_schedule_print_tasks(schedule_order_id: int, payload: SchedulePrintTaskBatchCreate, current_admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    schedule = require_entity(db.get(ProductionScheduleOrder, schedule_order_id), "排期不存在")
+    if schedule.status == "cancelled":
+        raise AppError("SCHEDULE_CANCELLED", "已取消排期不能创建打印任务", 409)
+
+    existing_count = len(
+        db.scalars(
+            select(ProductionScheduleItem.id).where(ProductionScheduleItem.schedule_order_id == schedule.id)
+        ).all()
+    )
+    for offset, task_payload in enumerate(payload.tasks):
+        if task_payload.scheduled_end_at <= task_payload.scheduled_start_at:
+            raise AppError("VALIDATION_ERROR", "打印任务结束时间必须晚于开始时间", status_code=422)
+        if task_payload.scheduled_start_at < schedule.planned_start_at or task_payload.scheduled_end_at > schedule.planned_end_at:
+            raise AppError("SCHEDULE_TIME_OUT_OF_RANGE", "打印任务时间必须在排期时间范围内", 409)
+        order_item = require_entity(db.get(OrderItem, task_payload.order_item_id), "订单明细不存在")
+        if order_item.order_id != schedule.order_id:
+            raise AppError("SCHEDULE_ORDER_ITEM_MISMATCH", "订单明细不属于该排期订单", 409)
+        require_entity(db.get(Printer, task_payload.printer_id), "打印机不存在")
+        task = PrintTask(
+            task_no=next_no(db, "seq_print_task_no", "PT"),
+            order_id=schedule.order_id,
+            order_item_id=order_item.id,
+            printer_id=task_payload.printer_id,
+            slice_file_id=task_payload.slice_file_id,
+            material_id=task_payload.material_id,
+            status="scheduled",
+            priority=task_payload.priority,
+            plate_count=task_payload.plate_count,
+            planned_quantity=task_payload.planned_quantity,
+            use_ams=task_payload.use_ams,
+            estimated_minutes=task_payload.estimated_minutes,
+        )
+        db.add(task)
+        db.flush()
+        db.add(
+            ProductionScheduleItem(
+                schedule_order_id=schedule.id,
+                print_task_id=task.id,
+                printer_id=task.printer_id,
+                scheduled_start_at=task_payload.scheduled_start_at,
+                scheduled_end_at=task_payload.scheduled_end_at,
+                status="scheduled",
+                sort_order=(existing_count or 0) + offset,
+            )
+        )
+    schedule.status = "scheduled"
+    db.commit()
+    db.refresh(schedule)
     return success_response(serialize_schedule(db, schedule))
 
 
@@ -175,17 +252,39 @@ def serialize_schedule(db: Session, schedule: ProductionScheduleOrder, include_i
         "planned_end_at": schedule.planned_end_at,
         "due_at": schedule.due_at,
         "priority": schedule.priority,
+        "order_items": [],
+        "print_tasks": [],
         "items": [],
         "material_locks": [],
     }
     if include_items:
+        order_items = db.scalars(select(OrderItem).where(OrderItem.order_id == schedule.order_id).order_by(OrderItem.id)).all()
+        print_tasks = db.scalars(select(PrintTask).where(PrintTask.order_id == schedule.order_id).order_by(PrintTask.id)).all()
         items = db.scalars(select(ProductionScheduleItem).where(ProductionScheduleItem.schedule_order_id == schedule.id).order_by(ProductionScheduleItem.sort_order, ProductionScheduleItem.id)).all()
         locks = db.scalars(select(InventoryLock).where(InventoryLock.order_id == schedule.order_id).order_by(InventoryLock.id)).all()
+        order_item_data = {item.id: serialize_order_item(db, item) for item in order_items}
+        data["order_items"] = list(order_item_data.values())
+        data["print_tasks"] = [
+            {
+                "id": task.id,
+                "task_no": task.task_no,
+                "order_item_id": task.order_item_id,
+                "item": order_item_data.get(task.order_item_id),
+                "printer_id": task.printer_id,
+                "status": task.status,
+                "plate_count": task.plate_count,
+                "planned_quantity": task.planned_quantity,
+                "estimated_minutes": task.estimated_minutes,
+            }
+            for task in print_tasks
+        ]
+        task_data = {task["id"]: task for task in data["print_tasks"]}
         data["items"] = [
             {
                 "id": item.id,
                 "schedule_order_id": item.schedule_order_id,
                 "print_task_id": item.print_task_id,
+                "print_task": task_data.get(item.print_task_id),
                 "printer_id": item.printer_id,
                 "scheduled_start_at": item.scheduled_start_at,
                 "scheduled_end_at": item.scheduled_end_at,

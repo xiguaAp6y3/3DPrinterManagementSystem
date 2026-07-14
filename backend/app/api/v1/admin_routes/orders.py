@@ -12,6 +12,7 @@ from app.db.models.core import Order, OrderItem, PrintTask, ProductionScheduleOr
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import paginate, require_entity, to_float
+from app.services.order_items import serialize_order_item
 from app.services.order_status import sync_order_shipping_status
 
 router = APIRouter()
@@ -122,28 +123,12 @@ def serialize_order_detail(db: Session, order: Order, shallow: bool = False) -> 
         "shipments": [],
         "created_at": order.created_at,
     }
+    items = db.scalars(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)).all()
+    data["items"] = [serialize_order_item(db, item) for item in items]
     if shallow:
         return data
-    items = db.scalars(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)).all()
     schedules = db.scalars(select(ProductionScheduleOrder).where(ProductionScheduleOrder.order_id == order.id).order_by(ProductionScheduleOrder.id)).all()
     print_tasks = db.scalars(select(PrintTask).where(PrintTask.order_id == order.id).order_by(PrintTask.id)).all()
-    data["items"] = [
-        {
-            "id": item.id,
-            "product_id": item.product_id,
-            "sku_id": item.sku_id,
-            "custom_request_id": item.custom_request_id,
-            "item_name": item.item_name,
-            "unit_price": to_float(item.unit_price) or 0,
-            "quantity": item.quantity,
-            "produced_quantity": item.produced_quantity,
-            "inbounded_quantity": item.inbounded_quantity,
-            "shipped_quantity": item.shipped_quantity,
-            "subtotal": to_float(item.subtotal) or 0,
-            "fulfillment_mode": item.fulfillment_mode,
-        }
-        for item in items
-    ]
     data["schedules"] = [{"id": item.id, "schedule_no": item.schedule_no, "status": item.status} for item in schedules]
     data["print_tasks"] = [{"id": item.id, "task_no": item.task_no, "status": item.status, "warehouse_status": item.warehouse_status} for item in print_tasks]
     data["shipments"] = [serialize_shipment(db, item) for item in db.scalars(select(Shipment).where(Shipment.order_id == order.id).order_by(Shipment.created_at.desc())).all()]

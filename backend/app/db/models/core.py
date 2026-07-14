@@ -274,6 +274,7 @@ class PrintTask(Base, TimestampMixin):
     warehouse_status: Mapped[str] = mapped_column(String(50), default="not_required", index=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     plate_count: Mapped[int] = mapped_column(Integer, default=1)
+    planned_quantity: Mapped[int] = mapped_column(Integer, default=1)
     use_ams: Mapped[bool] = mapped_column(Boolean, default=False)
     estimated_minutes: Mapped[int | None] = mapped_column(Integer)
     started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=False))

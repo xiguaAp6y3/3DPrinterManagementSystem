@@ -328,6 +328,7 @@ CREATE TABLE dbo.print_tasks (
     warehouse_status NVARCHAR(50) NOT NULL CONSTRAINT DF_print_tasks_warehouse_status DEFAULT N'not_required',
     priority INT NOT NULL CONSTRAINT DF_print_tasks_priority DEFAULT 0,
     plate_count INT NOT NULL CONSTRAINT DF_print_tasks_plate_count DEFAULT 1,
+    planned_quantity INT NOT NULL CONSTRAINT DF_print_tasks_planned_quantity DEFAULT 1,
     use_ams BIT NOT NULL CONSTRAINT DF_print_tasks_use_ams DEFAULT 0,
     estimated_minutes INT NULL,
     started_at DATETIME2(3) NULL,

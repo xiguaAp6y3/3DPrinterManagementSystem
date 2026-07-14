@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services import coupon_service
 from app.services.db_helpers import next_no, paginate, require_entity, to_float
+from app.services.order_items import serialize_order_item
 
 router = APIRouter()
 
@@ -44,6 +45,7 @@ class OrderSummary(BaseModel):
     fulfillment_modes: list[str] = Field(default_factory=list)
     user_coupon_id: int | None = None
     coupon_discount_amount: float = 0
+    items: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime | None = None
 
 
@@ -182,6 +184,10 @@ def serialize_order_summary(db: Session, order: Order) -> dict:
         "fulfillment_modes": fulfillment_modes,
         "user_coupon_id": order.user_coupon_id,
         "coupon_discount_amount": to_float(order.coupon_discount_amount) or 0,
+        "items": [
+            serialize_order_item(db, item)
+            for item in db.scalars(select(OrderItem).where(OrderItem.order_id == order.id).order_by(OrderItem.id)).all()
+        ],
         "created_at": order.created_at,
     }
 
@@ -195,23 +201,7 @@ def serialize_order_detail(db: Session, order: Order) -> dict:
         {
             "customer_note": order.customer_note,
             "admin_note": order.admin_note,
-            "items": [
-                {
-                    "id": item.id,
-                    "product_id": item.product_id,
-                    "sku_id": item.sku_id,
-                    "custom_request_id": item.custom_request_id,
-                    "item_name": item.item_name,
-                    "unit_price": to_float(item.unit_price) or 0,
-                    "quantity": item.quantity,
-                    "produced_quantity": item.produced_quantity,
-                    "inbounded_quantity": item.inbounded_quantity,
-                    "shipped_quantity": item.shipped_quantity,
-                    "subtotal": to_float(item.subtotal) or 0,
-                    "fulfillment_mode": item.fulfillment_mode,
-                }
-                for item in items
-            ],
+            "items": [serialize_order_item(db, item) for item in items],
             "schedules": [{"id": item.id, "schedule_no": item.schedule_no, "status": item.status} for item in schedules],
             "print_tasks": [{"id": item.id, "task_no": item.task_no, "status": item.status, "warehouse_status": item.warehouse_status} for item in print_tasks],
             "shipments": [serialize_shipment(db, item) for item in db.scalars(select(Shipment).where(Shipment.order_id == order.id).order_by(Shipment.created_at.desc())).all()],

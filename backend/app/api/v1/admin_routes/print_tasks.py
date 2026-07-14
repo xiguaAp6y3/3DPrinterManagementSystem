@@ -13,6 +13,7 @@ from app.db.models.core import Order, OrderItem, PrintTask, Printer
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import next_no, paginate, require_entity
+from app.services.order_items import serialize_order_item
 
 router = APIRouter()
 
@@ -27,6 +28,7 @@ class PrintTaskCreate(BaseModel):
     material_id: int | None = None
     priority: int = 0
     plate_count: int = Field(default=1, gt=0)
+    planned_quantity: int = Field(default=1, gt=0)
     use_ams: bool = False
     estimated_minutes: int | None = Field(default=None, ge=0)
 
@@ -49,11 +51,13 @@ class PrintTaskDetail(BaseModel):
     warehouse_status: str = "not_required"
     priority: int = 0
     plate_count: int = 1
+    planned_quantity: int = 1
     use_ams: bool = False
     estimated_minutes: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     failure_reason: str | None = None
+    item: dict | None = None
 
 
 @router.get("", response_model=ApiResponse[PageResponse[PrintTaskDetail]])
@@ -66,7 +70,7 @@ def list_print_tasks(page: int = 1, page_size: int = 20, status: PrintTaskStatus
     if order_id is not None:
         stmt = stmt.where(PrintTask.order_id == order_id)
     items, page, page_size, total = paginate(db, stmt, page, page_size)
-    return paginated_response([serialize_task(item) for item in items], page, page_size, total)
+    return paginated_response([serialize_task(db, item) for item in items], page, page_size, total)
 
 
 @router.post("", response_model=ApiResponse[PrintTaskDetail])
@@ -84,7 +88,7 @@ def create_print_task(payload: PrintTaskCreate, _: dict = Depends(require_admin)
     db.add(task)
     db.commit()
     db.refresh(task)
-    return success_response(serialize_task(task))
+    return success_response(serialize_task(db, task))
 
 
 def resolve_order_item_id(db: Session, order_id: int, order_item_id: int | None) -> int:
@@ -103,7 +107,7 @@ def resolve_order_item_id(db: Session, order_id: int, order_item_id: int | None)
 @router.get("/{task_id}", response_model=ApiResponse[PrintTaskDetail])
 def get_print_task(task_id: int, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     task = require_entity(db.get(PrintTask, task_id), "打印任务不存在")
-    return success_response(serialize_task(task))
+    return success_response(serialize_task(db, task))
 
 
 @router.patch("/{task_id}/status", response_model=ApiResponse[PrintTaskDetail])
@@ -132,10 +136,11 @@ def update_print_task_status(task_id: int, payload: PrintTaskStatusUpdate, _: di
                 printer.status = "idle"
     db.commit()
     db.refresh(task)
-    return success_response(serialize_task(task))
+    return success_response(serialize_task(db, task))
 
 
-def serialize_task(task: PrintTask) -> dict:
+def serialize_task(db: Session, task: PrintTask) -> dict:
+    order_item = db.get(OrderItem, task.order_item_id) if task.order_item_id else None
     return {
         "id": task.id,
         "task_no": task.task_no,
@@ -148,9 +153,11 @@ def serialize_task(task: PrintTask) -> dict:
         "warehouse_status": task.warehouse_status,
         "priority": task.priority,
         "plate_count": task.plate_count,
+        "planned_quantity": task.planned_quantity,
         "use_ams": task.use_ams,
         "estimated_minutes": task.estimated_minutes,
         "started_at": task.started_at,
         "finished_at": task.finished_at,
         "failure_reason": task.failure_reason,
+        "item": serialize_order_item(db, order_item) if order_item else None,
     }
