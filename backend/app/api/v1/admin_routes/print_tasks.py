@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import AppError
 from app.core.security import require_admin
 from app.core.time import utc8_now
-from app.db.models.core import Order, PrintTask, Printer
+from app.db.models.core import Order, OrderItem, PrintTask, Printer
 from app.db.session import get_db
 from app.schemas.response import ApiResponse, PageResponse, paginated_response, success_response
 from app.services.db_helpers import next_no, paginate, require_entity
@@ -71,13 +72,32 @@ def list_print_tasks(page: int = 1, page_size: int = 20, status: PrintTaskStatus
 @router.post("", response_model=ApiResponse[PrintTaskDetail])
 def create_print_task(payload: PrintTaskCreate, _: dict = Depends(require_admin), db: Session = Depends(get_db)):
     require_entity(db.get(Order, payload.order_id), "订单不存在")
+    order_item_id = resolve_order_item_id(db, payload.order_id, payload.order_item_id)
     if payload.printer_id is not None:
         require_entity(db.get(Printer, payload.printer_id), "打印机不存在")
-    task = PrintTask(task_no=next_no(db, "seq_print_task_no", "PT"), **payload.model_dump(), status="pending")
+    task = PrintTask(
+        task_no=next_no(db, "seq_print_task_no", "PT"),
+        **payload.model_dump(exclude={"order_item_id"}),
+        order_item_id=order_item_id,
+        status="pending",
+    )
     db.add(task)
     db.commit()
     db.refresh(task)
     return success_response(serialize_task(task))
+
+
+def resolve_order_item_id(db: Session, order_id: int, order_item_id: int | None) -> int:
+    if order_item_id is not None:
+        order_item = require_entity(db.get(OrderItem, order_item_id), "订单明细不存在")
+        if order_item.order_id != order_id:
+            raise AppError("PRINT_TASK_ORDER_ITEM_MISMATCH", "订单明细不属于该订单", 409)
+        return order_item.id
+
+    order_items = db.scalars(select(OrderItem).where(OrderItem.order_id == order_id)).all()
+    if len(order_items) != 1:
+        raise AppError("PRINT_TASK_ORDER_ITEM_REQUIRED", "多商品订单创建打印任务时必须指定订单明细", 409)
+    return order_items[0].id
 
 
 @router.get("/{task_id}", response_model=ApiResponse[PrintTaskDetail])

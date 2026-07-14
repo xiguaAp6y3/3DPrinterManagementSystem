@@ -422,18 +422,18 @@ def inbound_print_task(db: Session, task: PrintTask, warehouse_id: int, location
     if task.warehouse_status == "inbounded":
         raise AppError("PRINT_TASK_ALREADY_INBOUNDED", "打印任务已入库", 409)
     order = require_entity(db.get(Order, task.order_id), "订单不存在")
-    order_item = db.get(OrderItem, task.order_item_id) if task.order_item_id else None
+    order_item = resolve_task_order_item(db, task)
 
     stock_item = WarehouseStockItem(
         stock_item_no=next_no(db, "seq_stock_item_no", "ST"),
         warehouse_id=warehouse_id,
         location_id=location_id,
         order_id=task.order_id,
-        order_item_id=task.order_item_id,
+        order_item_id=order_item.id,
         print_task_id=task.id,
-        product_id=order_item.product_id if order_item else None,
-        sku_id=order_item.sku_id if order_item else None,
-        custom_request_id=order_item.custom_request_id if order_item else None,
+        product_id=order_item.product_id,
+        sku_id=order_item.sku_id,
+        custom_request_id=order_item.custom_request_id,
         quantity=quantity,
         status="available",
         inbounded_at=utc8_now(),
@@ -447,7 +447,7 @@ def inbound_print_task(db: Session, task: PrintTask, warehouse_id: int, location
         warehouse_id=warehouse_id,
         location_id=location_id,
         order_id=task.order_id,
-        order_item_id=task.order_item_id,
+        order_item_id=order_item.id,
         print_task_id=task.id,
         stock_item_id=stock_item.id,
         quantity=quantity,
@@ -456,12 +456,26 @@ def inbound_print_task(db: Session, task: PrintTask, warehouse_id: int, location
     )
     db.add(record)
     task.warehouse_status = "inbounded"
-    if order_item:
-        order_item.inbounded_quantity += quantity
-        order_item.produced_quantity = max(order_item.produced_quantity, order_item.inbounded_quantity)
+    order_item.inbounded_quantity += quantity
+    order_item.produced_quantity = max(order_item.produced_quantity, order_item.inbounded_quantity)
     sync_order_inbound_status(db, order)
     db.add(OperationLog(operator_id=staff_user_id, operation_type="transfer_to_warehouse", target_table="print_tasks", target_id=task.id, remark=remark))
     return record
+
+
+def resolve_task_order_item(db: Session, task: PrintTask) -> OrderItem:
+    if task.order_item_id is not None:
+        order_item = require_entity(db.get(OrderItem, task.order_item_id), "订单明细不存在")
+        if order_item.order_id != task.order_id:
+            raise AppError("PRINT_TASK_ORDER_ITEM_MISMATCH", "打印任务关联的订单明细不属于该订单", 409)
+        return order_item
+
+    order_items = db.scalars(select(OrderItem).where(OrderItem.order_id == task.order_id)).all()
+    if len(order_items) != 1:
+        raise AppError("PRINT_TASK_ORDER_ITEM_REQUIRED", "打印任务未关联订单明细，无法确定商品和 SKU", 409)
+
+    task.order_item_id = order_items[0].id
+    return order_items[0]
 
 
 def sync_order_inbound_status(db: Session, order: Order) -> None:
